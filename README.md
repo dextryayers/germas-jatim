@@ -144,7 +144,7 @@ Sesuaikan URL berdasarkan lingkungan deploy.
 ### 1. Kloning repositori
 
 ```bash
-git clone https://github.com/username/germas-jatim.git
+git clone https://github.com/dextryayers/germas-jatim.git
 cd germas-jatim
 ```
 
