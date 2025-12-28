@@ -5,6 +5,7 @@ import { Button } from './ui/Button';
 import { showConfirmation, showSuccess } from '../utils/alerts';
 import LogoJatim from './svg/logo-jatim.svg';
 import { VisitorTracker, VisitorStats } from '../utils/visitorTracker';
+import { apiClient } from '../utils/apiClient';
 
 const Layout: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -22,21 +23,74 @@ const Layout: React.FC = () => {
     return VisitorTracker.getStats();
   });
   const numberFormatter = useMemo(() => new Intl.NumberFormat('id-ID'), []);
-  
+
   const location = useLocation();
   const navigate = useNavigate();
 
   // Cek status login setiap kali lokasi berubah
   useEffect(() => {
     const checkAuth = () => {
-       const token = sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
-       setIsLoggedIn(!!token);
-       setAuthName(sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name'));
-       setAuthEmail(sessionStorage.getItem('user_email') ?? localStorage.getItem('user_email'));
-       setAuthInstansi(sessionStorage.getItem('user_instansi_name') ?? localStorage.getItem('user_instansi_name'));
-       setAuthPhoto(sessionStorage.getItem('user_photo_url') ?? localStorage.getItem('user_photo_url'));
+      const token = sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
+      setIsLoggedIn(!!token);
+      setAuthName(sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name'));
+      setAuthEmail(sessionStorage.getItem('user_email') ?? localStorage.getItem('user_email'));
+      setAuthInstansi(sessionStorage.getItem('user_instansi_name') ?? localStorage.getItem('user_instansi_name'));
+      setAuthPhoto(sessionStorage.getItem('user_photo_url') ?? localStorage.getItem('user_photo_url'));
     };
     checkAuth();
+
+    const token = sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
+    if (token) {
+      type MeResponse = {
+        status: string;
+        user: {
+          name: string;
+          email: string;
+          photo_url?: string | null;
+          instansi?: { name?: string | null } | null;
+        };
+      };
+
+      apiClient
+        .get<MeResponse>('/auth/me')
+        .then((response) => {
+          const name = response.user?.name ?? null;
+          const email = response.user?.email ?? null;
+          const instansi = response.user?.instansi?.name ?? null;
+          const photo = response.user?.photo_url ?? null;
+
+          if (name) {
+            sessionStorage.setItem('user_name', name);
+            localStorage.setItem('user_name', name);
+          }
+          if (email) {
+            sessionStorage.setItem('user_email', email);
+            localStorage.setItem('user_email', email);
+          }
+          if (instansi) {
+            sessionStorage.setItem('user_instansi_name', instansi);
+            localStorage.setItem('user_instansi_name', instansi);
+          } else {
+            sessionStorage.removeItem('user_instansi_name');
+            localStorage.removeItem('user_instansi_name');
+          }
+          if (photo) {
+            sessionStorage.setItem('user_photo_url', photo);
+            localStorage.setItem('user_photo_url', photo);
+          } else {
+            sessionStorage.removeItem('user_photo_url');
+            localStorage.removeItem('user_photo_url');
+          }
+
+          setAuthName(name);
+          setAuthEmail(email);
+          setAuthInstansi(instansi);
+          setAuthPhoto(photo);
+        })
+        .catch(() => {
+          /* ignore - fallback to cached storage */
+        });
+    }
 
     // Listen to custom event for immediate UI updates
     window.addEventListener('auth-change', checkAuth);
@@ -297,61 +351,65 @@ const Layout: React.FC = () => {
           >
             {isMenuOpen ? <X /> : <Menu />}
           </button>
-        </div>
 
-        {/* Mobile Nav */}
-        {isMenuOpen && (
-          <div className="md:hidden border-t border-emerald-100 bg-gradient-to-b from-white via-white-90 to-sky-50 p-4 space-y-2 shadow-lg shadow-emerald-200/60 absolute w-full left-0 top-20 z-40 max-h-[85vh] overflow-y-auto">
-            {navItems.map((item) => (
-              <Link 
-                key={item.path} 
-                to={item.path}
-                onClick={(e) => handleNavClick(e, item.path)}
-                className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                   (item.path === '/' && location.pathname === '/' && !location.hash) || (item.path !== '/' && location.hash === `#${item.path.split('#')[1]}`)
-                     ? 'bg-emerald-100/70 text-emerald-700 border-l-4 border-emerald-500' 
-                     : 'text-slate-600 hover:bg-emerald-50'
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-            <div className="pt-2 mt-2 border-t border-emerald-100/60">
-               {isLoggedIn ? (
-                  <div className="flex flex-col gap-2">
-                    <div className="px-4 py-3 bg-white/80 rounded-lg mb-2 flex items-center gap-3 shadow-sm">
-                       <img src="https://ui-avatars.com/api/?name=Budi+Santoso&background=0ea5e9&color=fff" className="w-10 h-10 rounded-full" alt="User" />
-                       <div>
-                          <p className="font-bold text-slate-800 text-sm">Dr. Budi Santoso</p>
-                          <p className="text-xs text-slate-500">Admin Kota Surabaya</p>
-                       </div>
+          {/* Mobile Nav */}
+          {isMenuOpen && (
+            <div className="md:hidden border-t border-emerald-100 bg-gradient-to-b from-white via-white-90 to-sky-50 p-4 space-y-2 shadow-lg shadow-emerald-200/60 absolute w-full left-0 top-20 z-40 max-h-[85vh] overflow-y-auto">
+              {navItems.map((item) => (
+                <Link 
+                  key={item.path} 
+                  to={item.path}
+                  onClick={(e) => handleNavClick(e, item.path)}
+                  className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                     (item.path === '/' && location.pathname === '/' && !location.hash) || (item.path !== '/' && location.hash === `#${item.path.split('#')[1]}`)
+                       ? 'bg-emerald-100/70 text-emerald-700 border-l-4 border-emerald-500' 
+                       : 'text-slate-600 hover:bg-emerald-50'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              <div className="pt-2 mt-2 border-t border-emerald-100/60">
+                 {isLoggedIn ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="px-4 py-3 bg-white/80 rounded-lg mb-2 flex items-center gap-3 shadow-sm">
+                         <img 
+                            src={authPhoto || `https://ui-avatars.com/api/?name=${encodeURIComponent(authName ?? 'Admin')}&background=0ea5e9&color=fff`}
+                            className="w-10 h-10 rounded-full" 
+                            alt={authName ?? 'User'} 
+                         />
+                         <div>
+                            <p className="font-bold text-slate-800 text-sm">{authName ?? 'Admin'}</p>
+                            <p className="text-xs text-slate-500">{authInstansi ?? 'Admin Panel'}</p>
+                         </div>
+                      </div>
+                      <Link to="/admin/dashboard" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-emerald-50 rounded-lg flex items-center gap-2 text-sm font-medium">
+                         <LayoutDashboard className="w-4 h-4" /> Dashboard
+                      </Link>
+                      <Link to="/admin/profile" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-emerald-50 rounded-lg flex items-center gap-2 text-sm font-medium">
+                         <User className="w-4 h-4" /> Profil Saya
+                      </Link>
+                      <Button 
+                         onClick={() => { handleLogout(); setIsMenuOpen(false); }} 
+                         className="w-full justify-center bg-red-50 text-red-600 hover:bg-red-100/80 mt-2"
+                         leftIcon={<LogOut className="w-4 h-4"/>}
+                      >
+                         Logout
+                      </Button>
                     </div>
-                    <Link to="/admin/dashboard" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-emerald-50 rounded-lg flex items-center gap-2 text-sm font-medium">
-                       <LayoutDashboard className="w-4 h-4" /> Dashboard
-                    </Link>
-                    <Link to="/admin/profile" onClick={() => setIsMenuOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-emerald-50 rounded-lg flex items-center gap-2 text-sm font-medium">
-                       <User className="w-4 h-4" /> Profil Saya
-                    </Link>
+                 ) : (
                     <Button 
-                       onClick={() => { handleLogout(); setIsMenuOpen(false); }} 
-                       className="w-full justify-center bg-red-50 text-red-600 hover:bg-red-100/80 mt-2"
-                       leftIcon={<LogOut className="w-4 h-4"/>}
+                       onClick={() => { navigate('/login'); setIsMenuOpen(false); }} 
+                       className="w-full justify-center bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-600 hover:to-teal-700"
+                       leftIcon={<UserCircle className="w-4 h-4" />}
                     >
-                       Logout
+                       Login
                     </Button>
-                  </div>
-               ) : (
-                  <Button 
-                     onClick={() => { navigate('/login'); setIsMenuOpen(false); }} 
-                     className="w-full justify-center bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-600 hover:to-teal-700"
-                     leftIcon={<UserCircle className="w-4 h-4" />}
-                  >
-                     Login
-                  </Button>
-               )}
+                 )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {/* Main Content */}
@@ -400,7 +458,7 @@ const Layout: React.FC = () => {
                      </div>
                   </div>
                   <p className="text-emerald-100/90 text-sm leading-relaxed pr-4">
-                     Sistem Informasi Evaluasi dan Pelaporan Gerakan Masyarakat Hidup Sehat (GERMAS). Komitmen bersama untuk mewujudkan masyarakat Jawa Timur yang sehat, bugar, dan produktif.
+                     SI-PORSI GERMAS. Sistem Pelaporan dan Evaluasi Gerakan Masyarakat Hidup Sehat (GERMAS) Pada Tatanan Tempat Kerja .
                   </p>
                   <div className="flex gap-3">
                      {[Facebook, Twitter, Instagram, Youtube].map((Icon, i) => (
@@ -415,23 +473,14 @@ const Layout: React.FC = () => {
                <div className="md:pl-8">
                   <h3 className="text-white font-bold text-lg mb-6 flex items-center gap-2">
                      <span className="w-1 h-6 bg-yellow-300 rounded-full"></span>
-                     Tautan Cepat
+                     Link Terkait
                   </h3>
                   <ul className="space-y-3 text-sm">
-                     {navItems.map((item) => (
-                        <li key={item.path}>
-                           <Link 
-                              to={item.path} 
-                              onClick={(e) => handleNavClick(e, item.path)}
-                              className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90"
-                            >
-                              {item.label}
-                           </Link>
-                        </li>
-                     ))}
-                     <li><Link to="/login" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Login Administrator</Link></li>
-                     <li><a href="#" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Panduan Penggunaan</a></li>
-                     <li><a href="#" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Kebijakan Privasi</a></li>
+                     <li><a href="https://dinkes.jatimprov.go.id/" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Dinkes Jatim</a></li>
+                     <li><a href="https://jatimprov.go.id/" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Pemprov Jstim</a></li>
+                     <li><a href="https://www.kemkes.go.id/" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Kementrian Kesehatan RI</a></li>
+                     <li><a href="https://promkes.kemkes.go.id/" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Promkes Kemkes</a></li>
+                     <li><a href="https://yankes.kemkes.go.id/" className="hover:text-white hover:translate-x-1 transition-all inline-block text-emerald-100/90">Yankes Kemkes</a></li>
                   </ul>
                </div>
 
@@ -456,7 +505,7 @@ const Layout: React.FC = () => {
                         <div className="p-2 bg-emerald-700/70 rounded-lg group-hover:bg-emerald-500 transition-colors">
                            <Phone className="w-5 h-5 text-emerald-100 group-hover:text-white" />
                         </div>
-                        <span>(031) 8280910</span>
+                        <span>(031) 8280715</span>
                      </li>
                      <li className="flex items-center gap-3 group">
                         <div className="p-2 bg-emerald-700/70 rounded-lg group-hover:bg-emerald-500 transition-colors">
@@ -476,7 +525,6 @@ const Layout: React.FC = () => {
 
             <div className="border-t border-emerald-600/60 pt-8 mt-8 text-center text-xs text-emerald-200/90">
                <p className="mb-2">© 2025-2026 Dinas Kesehatan Provinsi Jawa Timur. Hak Cipta Dilindungi Undang-Undang.</p>
-               <p>Sistem Evaluasi GERMAS v1.0</p>
             </div>
          </div>
       </footer>

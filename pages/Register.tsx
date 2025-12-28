@@ -62,6 +62,37 @@ const ADMIN_CODE_REGEX = /^\d{6}$/;
 const STATIC_ADMIN_CODES = new Set(['135791', '246802', '231107']);
 const STATIC_CODE_DESCRIPTION = 'Kode admin registrasi';
 
+type RegencyOption = {
+  id: number;
+  code: string;
+  name: string;
+  type?: string;
+};
+
+type DistrictOption = {
+  id: number;
+  code: string;
+  name: string;
+};
+
+type VillageOption = {
+  id: number;
+  code: string;
+  name: string;
+};
+
+const normalizeCollection = <T,>(value: unknown): T[] => {
+  if (Array.isArray(value)) {
+    return value as T[];
+  }
+
+  if (value && typeof value === 'object' && Array.isArray((value as any).data)) {
+    return (value as any).data as T[];
+  }
+
+  return [];
+};
+
 const Register: React.FC = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
@@ -72,6 +103,13 @@ const Register: React.FC = () => {
   const [instansiName, setInstansiName] = useState('');
   const [useCustomInstansi, setUseCustomInstansi] = useState(false);
   const [customInstansi, setCustomInstansi] = useState('');
+  const [regencies, setRegencies] = useState<RegencyOption[]>([]);
+  const [districts, setDistricts] = useState<DistrictOption[]>([]);
+  const [villages, setVillages] = useState<VillageOption[]>([]);
+  const [originRegencyId, setOriginRegencyId] = useState('');
+  const [originDistrictId, setOriginDistrictId] = useState('');
+  const [originVillageId, setOriginVillageId] = useState('');
+  const [regionLoading, setRegionLoading] = useState(false);
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -80,11 +118,100 @@ const Register: React.FC = () => {
     confirmPassword: '',
   });
 
+  const normalizedInstansiLevel = instansiLevel.replace(/^Tingkat\s+/i, '').trim();
+  const needsOriginRegency = ['Kabupaten/Kota', 'Perusahaan', 'Kecamatan', 'Desa/Kelurahan'].includes(normalizedInstansiLevel);
+  const needsOriginDistrict = ['Kecamatan', 'Desa/Kelurahan'].includes(normalizedInstansiLevel);
+  const needsOriginVillage = ['Desa/Kelurahan'].includes(normalizedInstansiLevel);
+
   useEffect(() => {
     apiClient.prefetchCsrf().catch(() => {
       /* swallow error; handled during actual request */
     });
   }, []);
+
+  useEffect(() => {
+    if (!needsOriginRegency) {
+      setOriginRegencyId('');
+      setOriginDistrictId('');
+      setOriginVillageId('');
+      setDistricts([]);
+      setVillages([]);
+      return;
+    }
+
+    if (regencies.length > 0) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ regencies: unknown }>('/regions', { query: { province_code: '35' } })
+      .then((response) => {
+        const items = normalizeCollection<RegencyOption>((response as any)?.regencies);
+        setRegencies(items.map((item) => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          type: item.type,
+        })));
+      })
+      .catch(() => {
+        setRegencies([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [needsOriginRegency, regencies.length]);
+
+  useEffect(() => {
+    setOriginDistrictId('');
+    setOriginVillageId('');
+    setDistricts([]);
+    setVillages([]);
+
+    if (!needsOriginDistrict || !originRegencyId) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ districts: unknown }>(`/regions/${originRegencyId}/districts`)
+      .then((response) => {
+        const items = normalizeCollection<DistrictOption>((response as any)?.districts);
+        setDistricts(items.map((item) => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+        })));
+      })
+      .catch(() => {
+        setDistricts([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [needsOriginDistrict, originRegencyId]);
+
+  useEffect(() => {
+    setOriginVillageId('');
+    setVillages([]);
+
+    if (!needsOriginVillage || !originDistrictId) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ villages: unknown }>(`/districts/${originDistrictId}/villages`)
+      .then((response) => {
+        const items = normalizeCollection<VillageOption>((response as any)?.villages);
+        setVillages(items.map((item) => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+        })));
+      })
+      .catch(() => {
+        setVillages([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [needsOriginVillage, originDistrictId]);
 
   const handleInputChange = (field: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
@@ -205,13 +332,25 @@ const Register: React.FC = () => {
 
       payload.append('phone', form.phone.trim());
 
-      const resolvedInstansiLevel = instansiLevel || adminCodeMeta.instansiLevel?.name || '';
+      const resolvedInstansiLevel = instansiLevel
+        || (adminCodeMeta.status === 'valid' ? adminCodeMeta.instansiLevel?.name : undefined)
+        || '';
       const resolvedInstansiName = (useCustomInstansi ? customInstansi.trim() : instansiName.trim())
-        || adminCodeMeta.instansi?.name
+        || (adminCodeMeta.status === 'valid' ? adminCodeMeta.instansi?.name : undefined)
         || '';
 
       payload.append('instansi_level_text', resolvedInstansiLevel);
       payload.append('instansi_name', resolvedInstansiName);
+
+      if (needsOriginRegency && originRegencyId) {
+        payload.append('origin_regency_id', originRegencyId);
+      }
+      if (needsOriginDistrict && originDistrictId) {
+        payload.append('origin_district_id', originDistrictId);
+      }
+      if (needsOriginVillage && originVillageId) {
+        payload.append('origin_village_id', originVillageId);
+      }
 
       if (adminCodeMeta.status === 'valid' && adminCodeMeta.instansi?.id) {
         payload.append('instansi_id', String(adminCodeMeta.instansi.id));
@@ -440,7 +579,14 @@ const Register: React.FC = () => {
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tingkat Instansi</label>
                     <select
                       value={instansiLevel}
-                      onChange={(event) => setInstansiLevel(event.target.value)}
+                      onChange={(event) => {
+                        setInstansiLevel(event.target.value);
+                        setOriginRegencyId('');
+                        setOriginDistrictId('');
+                        setOriginVillageId('');
+                        setDistricts([]);
+                        setVillages([]);
+                      }}
                       className="block w-full px-4 py-2.5 border border-slate-300 rounded-xl bg-white text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                       required
                     >
@@ -485,6 +631,98 @@ const Register: React.FC = () => {
                     </select>
                   </div>
                 </div>
+
+                {needsOriginRegency && (
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asal Kab/Kota</label>
+                      <select
+                        value={originRegencyId}
+                        onChange={(event) => setOriginRegencyId(event.target.value)}
+                        className="block w-full px-4 py-2.5 border border-slate-300 rounded-xl bg-white text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                        required
+                        disabled={regionLoading}
+                      >
+                        <option value="" disabled>
+                          {regionLoading ? 'Memuat kab/kota...' : 'Pilih Kab/Kota'}
+                        </option>
+                        {regencies.map((item) => {
+                          const rawName = item.name || '';
+                          const lowerName = rawName.toLowerCase();
+
+                          // 1) Deteksi tipe dari awalan nama (lebih dipercaya)
+                          let typeLabel: string | null = null;
+                          if (lowerName.startsWith('kota ')) typeLabel = 'Kota';
+                          else if (lowerName.startsWith('kabupaten ')) typeLabel = 'Kabupaten';
+
+                          // 2) Jika nama tidak mengandung awalan yang jelas, gunakan field type dari API
+                          if (!typeLabel) {
+                            const rawType = item.type ? String(item.type).toLowerCase() : '';
+                            if (rawType.startsWith('kab')) typeLabel = 'Kabupaten';
+                            else if (rawType.startsWith('kot')) typeLabel = 'Kota';
+                          }
+
+                          const baseName = rawName
+                            .replace(/^Kabupaten\s+/i, '')
+                            .replace(/^Kota\s+/i, '')
+                            .trim();
+
+                          const label = typeLabel ? `${typeLabel} ${baseName}`.trim() : rawName;
+
+                          return (
+                            <option key={item.id} value={String(item.id)}>
+                              {label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {needsOriginDistrict && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asal Kecamatan</label>
+                        <select
+                          value={originDistrictId}
+                          onChange={(event) => setOriginDistrictId(event.target.value)}
+                          className="block w-full px-4 py-2.5 border border-slate-300 rounded-xl bg-white text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                          required
+                          disabled={!originRegencyId || regionLoading}
+                        >
+                          <option value="" disabled>
+                            {!originRegencyId ? 'Pilih kab/kota terlebih dahulu' : regionLoading ? 'Memuat kecamatan...' : 'Pilih Kecamatan'}
+                          </option>
+                          {districts.map((item) => (
+                            <option key={item.id} value={String(item.id)}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {needsOriginVillage && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asal Desa/Kelurahan</label>
+                    <select
+                      value={originVillageId}
+                      onChange={(event) => setOriginVillageId(event.target.value)}
+                      className="block w-full px-4 py-2.5 border border-slate-300 rounded-xl bg-white text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                      required
+                      disabled={!originDistrictId || regionLoading}
+                    >
+                      <option value="" disabled>
+                        {!originDistrictId ? 'Pilih kecamatan terlebih dahulu' : regionLoading ? 'Memuat desa/kelurahan...' : 'Pilih Desa/Kelurahan'}
+                      </option>
+                      {villages.map((item) => (
+                        <option key={item.id} value={String(item.id)}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {useCustomInstansi && (
                   <div>

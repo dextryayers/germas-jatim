@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\UserResource;
 use App\Models\AdminInviteCode;
+use App\Models\District;
 use App\Models\Instansi;
 use App\Models\InstansiLevel;
+use App\Models\Regency;
 use App\Models\User;
+use App\Models\Village;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -99,6 +102,9 @@ class AdminRegistrationController extends Controller
             'admin_code' => ['required', 'string'],
             'instansi_id' => ['nullable', Rule::exists(Instansi::class, 'id')],
             'instansi_level_id' => ['nullable', Rule::exists(InstansiLevel::class, 'id')],
+            'origin_regency_id' => ['nullable', Rule::exists(Regency::class, 'id')],
+            'origin_district_id' => ['nullable', Rule::exists(District::class, 'id')],
+            'origin_village_id' => ['nullable', Rule::exists(Village::class, 'id')],
             'instansi_name' => ['required_without:instansi_id', 'string', 'max:255'],
             'instansi_level_text' => ['nullable', 'string', 'max:150'],
             'photo' => ['nullable', 'image', "max:{$maxPhotoSizeKb}"],
@@ -211,6 +217,9 @@ class AdminRegistrationController extends Controller
                     'role' => 'admin',
                     'instansi_id' => $resolvedInstansiId,
                     'instansi_level_id' => $resolvedInstansiLevelId,
+                    'origin_regency_id' => $data['origin_regency_id'] ?? null,
+                    'origin_district_id' => $data['origin_district_id'] ?? null,
+                    'origin_village_id' => $data['origin_village_id'] ?? null,
                     'admin_code' => $invite->code ?? $data['admin_code'],
                     'photo_url' => $photoPath,
                     'email_verified_at' => now(),
@@ -241,7 +250,7 @@ class AdminRegistrationController extends Controller
             'message' => 'Registrasi admin berhasil.',
             'token' => $token,
             'token_type' => 'Bearer',
-            'user' => UserResource::make($user->load(['instansi', 'instansiLevel']))->resolve(),
+            'user' => UserResource::make($user->load(['instansi', 'instansiLevel', 'originRegency', 'originDistrict', 'originVillage']))->resolve(),
         ], 201);
     }
 }

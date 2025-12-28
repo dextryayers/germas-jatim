@@ -21,6 +21,18 @@ class EvaluationSubmissionResource extends JsonResource
             'instansi_level_id' => $this->instansi_level_id,
             'instansi_level_text' => $this->instansi_level_text,
             'instansi_address' => $this->instansi_address,
+            'origin_regency_id' => $this->origin_regency_id,
+            'origin_district_id' => $this->origin_district_id,
+            'origin_village_id' => $this->origin_village_id,
+            'origin_regency_name' => optional($this->whenLoaded('originRegency', function () {
+                return $this->originRegency;
+            }) ?? $this->originRegency)->name,
+            'origin_district_name' => optional($this->whenLoaded('originDistrict', function () {
+                return $this->originDistrict;
+            }) ?? $this->originDistrict)->name,
+            'origin_village_name' => optional($this->whenLoaded('originVillage', function () {
+                return $this->originVillage;
+            }) ?? $this->originVillage)->name,
             'pejabat_nama' => $this->pejabat_nama,
             'pejabat_jabatan' => $this->pejabat_jabatan,
             'employee_male_count' => $this->employee_male_count,

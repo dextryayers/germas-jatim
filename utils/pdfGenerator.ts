@@ -14,6 +14,79 @@ const COLORS = {
   border: [226, 232, 240], // slate-200
 };
 
+// --- FILENAME HELPERS ---
+
+// Normalize text to be safe for filenames: remove accents, keep alnum/_/-, collapse spaces
+const normalizeForFilename = (text: string): string => {
+  if (!text) return '';
+
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove diacritics
+    .replace(/[^a-zA-Z0-9-_]+/g, '_') // replace non-safe chars with underscore
+    .replace(/_+/g, '_') // collapse multiple underscores
+    .replace(/^_+|_+$/g, ''); // trim underscores at ends
+};
+
+const buildOriginLabelForFilename = (
+  originRegencyName?: string | null,
+  originDistrictName?: string | null,
+  originVillageName?: string | null,
+): string | null => {
+  const parts: string[] = [];
+
+  if (originRegencyName) {
+    parts.push(`KabKota_${originRegencyName}`);
+  }
+  if (originDistrictName) {
+    parts.push(`Kec_${originDistrictName}`);
+  }
+  if (originVillageName) {
+    parts.push(`DesaKel_${originVillageName}`);
+  }
+
+  if (parts.length === 0) return null;
+
+  return normalizeForFilename(parts.join('_')) || null;
+};
+
+const buildEvaluasiFilename = (instansiData: any): string => {
+  const namaInstansiRaw = instansiData?.nama || 'Instansi';
+
+  const originLabel = buildOriginLabelForFilename(
+    instansiData?.originRegencyName,
+    instansiData?.originDistrictName,
+    instansiData?.originVillageName,
+  );
+
+  const instansiPart = normalizeForFilename(String(namaInstansiRaw)).substring(0, 40) || 'Instansi';
+
+  // Jika asal wilayah ada, pakai sebagai bagian utama nama file; jika tidak, fallback ke tingkat
+  const tingkatRaw = instansiData?.tingkat || null;
+  const tingkatPart = normalizeForFilename(String(tingkatRaw ?? '')) || null;
+
+  const locationPart = originLabel || tingkatPart || 'Lokasi_Tidak_Diketahui';
+
+  return `Evaluasi_${instansiPart}_${locationPart}.pdf`;
+};
+
+const buildLaporanFilename = (
+  template: LaporanTemplate,
+  originRegencyName: string | undefined,
+  year: string,
+): string => {
+  const namaInstansiRaw = (template as any)?.instansiName || 'Instansi';
+  const instansiPart = normalizeForFilename(String(namaInstansiRaw)).substring(0, 40) || 'Instansi';
+
+  const originPart = originRegencyName
+    ? normalizeForFilename(`KabKota_${originRegencyName}`)
+    : null;
+
+  const yearPart = normalizeForFilename(String(year)) || new Date().getFullYear().toString();
+
+  return `Laporan_${instansiPart}_${originPart || 'Lokasi_Tidak_Diketahui'}_${yearPart}.pdf`;
+};
+
 // Helper: Header Banner
 const addHeader = (doc: jsPDF, title: string, subtitle: string) => {
   const pageWidth = doc.internal.pageSize.width;
@@ -125,6 +198,22 @@ export const generateEvaluasiPDF = (
   addInfoRow("Alamat", instansiData.alamat, 0, currentY + 12);
   addInfoRow("Tingkat", instansiData.tingkat, 0, currentY + 24);
 
+  // Origin (if available, use names only; do not expose numeric IDs)
+  const originParts: string[] = [];
+  if (instansiData.originRegencyName) {
+    originParts.push(`Kab/Kota: ${instansiData.originRegencyName}`);
+  }
+  if (instansiData.originDistrictName) {
+    originParts.push(`Kecamatan: ${instansiData.originDistrictName}`);
+  }
+  if (instansiData.originVillageName) {
+    originParts.push(`Desa/Kel: ${instansiData.originVillageName}`);
+  }
+
+  if (originParts.length > 0) {
+    addInfoRow("Asal Wilayah", originParts.join(' | '), 0, currentY + 36);
+  }
+
   // Right Column
   addInfoRow("Pejabat/Pengelola", instansiData.pejabat, 100);
   addInfoRow("Jumlah Pegawai", `L: ${instansiData.jmlLaki} / P: ${instansiData.jmlPerempuan}`, 100, currentY + 12);
@@ -217,28 +306,39 @@ export const generateEvaluasiPDF = (
   });
 
   addFooter(doc);
-  doc.save(`Evaluasi_${instansiData.nama.substring(0, 15).replace(/\s/g, '_')}.pdf`);
+  const filename = buildEvaluasiFilename(instansiData);
+  doc.save(filename);
 };
 
 // --- GENERATOR PDF LAPORAN ---
 export const generateLaporanPDF = (
   template: LaporanTemplate,
-  level: string,
+  originLabel: string | undefined,
   laporanInputs: Record<string, any>,
-  year: string = new Date().getFullYear().toString()
+  year: string = new Date().getFullYear().toString(),
 ) => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.width;
 
-  // 1. Header
-  addHeader(doc, "Laporan Kegiatan Germas", `Tahun ${year} - ${template.instansiName}`);
+  // 1. Header — sertakan asal wilayah di judul jika tersedia
+  const locationTitle = originLabel || 'Provinsi Jawa Timur';
+  addHeader(doc, "Laporan Kegiatan Germas", `${locationTitle} - Tahun ${year} - ${template.instansiName}`);
 
   let currentY = 50;
 
   // 2. Metadata Simple
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Tingkat: ${level === 'Provinsi' ? 'Provinsi Jawa Timur' : 'Kabupaten/Kota'}`, 14, 45);
+
+  const isKabKota = !!originLabel && !originLabel.toUpperCase().includes('PROVINSI');
+  doc.text(`Tingkat: ${isKabKota ? 'Kabupaten/Kota' : 'Provinsi Jawa Timur'}`, 14, 45);
+
+  // Asal wilayah (jika tersedia)
+  if (originLabel) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Asal Wilayah Instansi: ${originLabel}`, 14, 50);
+  }
   
   template.sections.forEach((section, idx) => {
       if (currentY > 230) {
@@ -316,5 +416,6 @@ export const generateLaporanPDF = (
   });
 
   addFooter(doc);
-  doc.save(`Laporan_${template.instansiId}_${year}.pdf`);
+  const filename = buildLaporanFilename(template, originLabel, year);
+  doc.save(filename);
 };

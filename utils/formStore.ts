@@ -29,6 +29,7 @@ export interface LaporanSection {
 export interface LaporanTemplate {
   instansiId: string;
   instansiName: string;
+  level?: string;
   sections: LaporanSection[];
 }
 
@@ -195,7 +196,7 @@ export const FormStore = {
   },
 
   // Laporan
-  getLaporanTemplate: (instansiId: string): LaporanTemplate => {
+  getLaporanTemplate: (instansiId: string, level?: string): LaporanTemplate => {
     const stored = localStorage.getItem(STORAGE_KEY_LAPORAN);
     let allTemplates: Record<string, LaporanTemplate> = {};
 
@@ -203,28 +204,41 @@ export const FormStore = {
       allTemplates = JSON.parse(stored);
     }
 
+    const compositeKey = level ? `${level}::${instansiId}` : null;
+
+    if (compositeKey && allTemplates[compositeKey]) {
+      return allTemplates[compositeKey];
+    }
+
     if (allTemplates[instansiId]) {
       return allTemplates[instansiId];
     }
 
     // Defaults
-    if (instansiId === 'bappeda') return DEFAULT_LAPORAN_BAPPEDA;
-    if (instansiId === 'dinkes') return DEFAULT_LAPORAN_DINKES;
+    if (instansiId === 'bappeda') return { ...DEFAULT_LAPORAN_BAPPEDA, level };
+    if (instansiId === 'dinkes') return { ...DEFAULT_LAPORAN_DINKES, level };
 
     // Generic Default if unknown
     const instansiName = INSTANSI_LIST.find(i => i.id === instansiId)?.name || 'Instansi';
     return {
       instansiId,
       instansiName,
+      level,
       sections: []
     };
   },
 
-  saveLaporanTemplate: (template: LaporanTemplate) => {
+  saveLaporanTemplate: (template: LaporanTemplate, level?: string) => {
     const stored = localStorage.getItem(STORAGE_KEY_LAPORAN);
     let allTemplates: Record<string, LaporanTemplate> = stored ? JSON.parse(stored) : {};
-    
-    allTemplates[template.instansiId] = template;
+
+    const resolvedLevel = level ?? template.level;
+    const key = resolvedLevel ? `${resolvedLevel}::${template.instansiId}` : template.instansiId;
+
+    allTemplates[key] = {
+      ...template,
+      level: resolvedLevel,
+    };
     localStorage.setItem(STORAGE_KEY_LAPORAN, JSON.stringify(allTemplates));
   },
   

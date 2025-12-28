@@ -25,6 +25,9 @@ class User extends Authenticatable
         'role',
         'instansi_id',
         'instansi_level_id',
+        'origin_regency_id',
+        'origin_district_id',
+        'origin_village_id',
         'admin_code',
         'phone',
         'photo_url',
@@ -63,5 +66,20 @@ class User extends Authenticatable
     public function instansiLevel(): BelongsTo
     {
         return $this->belongsTo(InstansiLevel::class, 'instansi_level_id');
+    }
+
+    public function originRegency(): BelongsTo
+    {
+        return $this->belongsTo(Regency::class, 'origin_regency_id');
+    }
+
+    public function originDistrict(): BelongsTo
+    {
+        return $this->belongsTo(District::class, 'origin_district_id');
+    }
+
+    public function originVillage(): BelongsTo
+    {
+        return $this->belongsTo(Village::class, 'origin_village_id');
     }
 }

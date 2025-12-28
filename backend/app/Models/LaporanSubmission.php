@@ -18,6 +18,8 @@ class LaporanSubmission extends Model
         'instansi_name',
         'instansi_level_id',
         'instansi_level_text',
+        'origin_regency_id',
+        'origin_regency_name',
         'report_year',
         'report_level',
         'status',

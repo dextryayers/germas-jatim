@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
@@ -64,13 +66,13 @@ class AuthController extends Controller
             'status' => 'success',
             'token' => $token,
             'token_type' => 'Bearer',
-            'user' => UserResource::make($user->fresh(['instansi', 'instansiLevel']))->resolve(),
+            'user' => UserResource::make($user->fresh(['instansi', 'instansiLevel', 'originRegency', 'originDistrict', 'originVillage']))->resolve(),
         ]);
     }
 
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user()->loadMissing(['instansi', 'instansiLevel']);
+        $user = $request->user()->loadMissing(['instansi', 'instansiLevel', 'originRegency', 'originDistrict', 'originVillage']);
 
         return response()->json([
             'status' => 'success',
@@ -93,6 +95,85 @@ class AuthController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Token berhasil dicabut.',
+        ]);
+    }
+
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:30'],
+        ]);
+
+        $user = $request->user();
+        $user->forceFill([
+            'name' => $payload['name'],
+            'phone' => $payload['phone'] ?? null,
+        ])->save();
+
+        $user = $user->fresh(['instansi', 'instansiLevel', 'originRegency', 'originDistrict', 'originVillage']);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Profil berhasil diperbarui.',
+            'user' => UserResource::make($user)->resolve(),
+        ]);
+    }
+
+    public function changePassword(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'confirmed', Password::min(8)],
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($payload['current_password'], $user->password)) {
+            return response()->json([
+                'status' => 'unprocessable_entity',
+                'message' => 'Password lama tidak sesuai.',
+                'errors' => [
+                    'current_password' => ['Password lama tidak sesuai.'],
+                ],
+            ], 422);
+        }
+
+        $user->forceFill([
+            'password' => $payload['password'],
+        ])->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Password berhasil diubah.',
+        ]);
+    }
+
+    public function uploadPhoto(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'photo' => ['required', 'file', 'image', 'max:2048'],
+        ]);
+
+        $user = $request->user();
+        $file = $payload['photo'];
+
+        $path = $file->storePublicly('profile-photos', ['disk' => 'public']);
+
+        $old = $user->photo_url;
+        if ($old && ! str_starts_with($old, 'http://') && ! str_starts_with($old, 'https://') && ! str_starts_with($old, '//')) {
+            if (Storage::disk('public')->exists($old)) {
+                Storage::disk('public')->delete($old);
+            }
+        }
+
+        $user->forceFill(['photo_url' => $path])->save();
+        $user = $user->fresh(['instansi', 'instansiLevel', 'originRegency', 'originDistrict', 'originVillage']);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Foto profil berhasil diperbarui.',
+            'user' => UserResource::make($user)->resolve(),
         ]);
     }
 

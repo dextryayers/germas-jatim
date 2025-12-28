@@ -10,6 +10,7 @@ import { FormStore, Cluster, LaporanTemplate, INSTANSI_LEVELS, INSTANSI_LIST } f
 import { submitToGoogleSheets } from '../utils/googleSheets';
 import { generateEvaluasiPDF, generateLaporanPDF } from '../utils/pdfGenerator';
 import { SubmissionStore } from '../utils/submissionStore';
+import { apiClient } from '../utils/apiClient';
 
 // ==========================================
 // DATA & TYPES 
@@ -25,7 +26,36 @@ interface InstansiData {
   jmlLaki: string;
   jmlPerempuan: string;
   tanggal: string; // YYYY-MM-DD if date input
-}
+};
+
+const EVAL_LEVEL_TO_ID: Record<string, number> = {
+  'INSTANSI TINGKAT PROVINSI': 1,
+  'INSTANSI TINGKAT KABUPATEN / KOTA': 2,
+  'INSTANSI TINGKAT KECAMATAN': 3,
+  'INSTANSI TINGKAT KELURAHAN / DESA': 4,
+  'INSTANSI TINGKAT PERUSAHAAN': 5,
+};
+
+type RegencyOption = { id: number; code: string; name: string; type?: string };
+type DistrictOption = { id: number; code: string; name: string };
+type VillageOption = { id: number; code: string; name: string };
+
+const getReportingYear = (): number => {
+  const fallback = new Date().getFullYear();
+  if (typeof window === 'undefined') return fallback;
+  const stored = window.localStorage.getItem('reporting_year');
+  if (!stored) return fallback;
+  const parsed = parseInt(stored, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+const slugifyInstansi = (value: string): string => {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
 
 // ==========================================
 // COMPONENT: EVALUASI FORM (DYNAMIC)
@@ -35,29 +65,188 @@ const EvaluasiForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [instansiData, setInstansiData] = useState<InstansiData>({
     tingkat: '', nama: '', alamat: '', pejabat: '', jmlLaki: '', jmlPerempuan: '', tanggal: ''
   });
-  
+
+  const reportingYear = getReportingYear();
+
+  const [regencies, setRegencies] = useState<RegencyOption[]>([]);
+  const [districts, setDistricts] = useState<DistrictOption[]>([]);
+  const [villages, setVillages] = useState<VillageOption[]>([]);
+  const [originRegencyId, setOriginRegencyId] = useState('');
+  const [originDistrictId, setOriginDistrictId] = useState('');
+  const [originVillageId, setOriginVillageId] = useState('');
+  const [regionLoading, setRegionLoading] = useState(false);
+
   // Dynamic Clusters Data
   const [clusters, setClusters] = useState<Cluster[]>([]);
   
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [remarks, setRemarks] = useState<Record<number, string>>({}); // Keterangan
 
-  const handleLevelSelect = (level: string) => {
+  // Hasil dari backend
+  const [resultScore, setResultScore] = useState<number | null>(null);
+  const [resultCategory, setResultCategory] = useState<{ label: string; color: string } | null>(null);
+
+  const handleLevelSelect = async (level: string) => {
     // 1. Set Level
     setInstansiData(prev => ({ ...prev, tingkat: level.toUpperCase() }));
-    
-    // 2. Fetch Config from Store
-    const loadedClusters = FormStore.getEvaluasiTemplate(level);
-    setClusters(loadedClusters);
 
-    // 3. Move to Form
+    // Reset wilayah & jawaban ketika ganti tingkat
+    setOriginRegencyId('');
+    setOriginDistrictId('');
+    setOriginVillageId('');
+    setDistricts([]);
+    setVillages([]);
+    setAnswers({});
+    setRemarks({});
+
+    // 2. Fetch konfigurasi klaster dari backend agar global antar perangkat, per tingkat instansi
+    try {
+      const levelId = EVAL_LEVEL_TO_ID[level] ?? null;
+      const resp = await apiClient.get<any>('/templates/evaluasi', {
+        query: {
+          instansi_level_id: levelId || undefined,
+        },
+      });
+
+      const rawData: any[] = (resp as any)?.data ?? [];
+
+      const mappedClusters: Cluster[] = rawData.map((cluster: any) => ({
+        id: Number(cluster.id),
+        title: String(cluster.title ?? ''),
+        questions: Array.isArray(cluster.questions)
+          ? cluster.questions.map((q: any) => ({
+              id: Number(q.id),
+              text: String(q.question_text ?? q.text ?? ''),
+            }))
+          : [],
+      }));
+
+      setClusters(mappedClusters);
+    } catch (error) {
+      console.error('Gagal memuat template evaluasi dari server, fallback ke FormStore lokal', error);
+      const fallbackClusters = FormStore.getEvaluasiTemplate(level) || [];
+      setClusters(fallbackClusters);
+    }
+
+    // 3. Pindah ke form
     setStep('FORM');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInstansiData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const normalizedInstansiLevel = instansiData.tingkat.trim().toUpperCase();
+  const isCompanyLevel = normalizedInstansiLevel.includes('PERUSAHAAN');
+  const instansiNoun = isCompanyLevel ? 'Perusahaan' : 'Instansi';
+  const needsOriginRegency =
+    normalizedInstansiLevel.includes('KABUPATEN') ||
+    normalizedInstansiLevel.includes('KOTA') ||
+    normalizedInstansiLevel.includes('KECAMATAN') ||
+    normalizedInstansiLevel.includes('KELURAHAN') ||
+    normalizedInstansiLevel.includes('DESA') ||
+    normalizedInstansiLevel.includes('PERUSAHAAN');
+  const needsOriginDistrict = normalizedInstansiLevel.includes('KECAMATAN') || normalizedInstansiLevel.includes('KELURAHAN') || normalizedInstansiLevel.includes('DESA');
+  const needsOriginVillage = normalizedInstansiLevel.includes('KELURAHAN') || normalizedInstansiLevel.includes('DESA');
+
+  const normalizeCollection = <T,>(collection: unknown): T[] => {
+    if (Array.isArray(collection)) {
+      return collection as T[];
+    }
+
+    if (collection && typeof collection === 'object' && Array.isArray((collection as any).data)) {
+      return (collection as any).data as T[];
+    }
+
+    return [];
   };
+
+  useEffect(() => {
+    if (!needsOriginRegency) {
+      setOriginRegencyId('');
+      setOriginDistrictId('');
+      setOriginVillageId('');
+      setDistricts([]);
+      setVillages([]);
+      return;
+    }
+
+    if (regencies.length > 0) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ regencies: unknown }>('/regions', { query: { province_code: '35' } })
+      .then((response) => {
+        const items = normalizeCollection<RegencyOption>((response as any)?.regencies);
+        setRegencies(
+          items.map((item) => ({
+            id: item.id,
+            code: item.code,
+            name: item.name,
+            type: item.type,
+          }))
+        );
+      })
+      .catch(() => {
+        setRegencies([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [needsOriginRegency, regencies.length]);
+
+  useEffect(() => {
+    setOriginDistrictId('');
+    setOriginVillageId('');
+    setDistricts([]);
+    setVillages([]);
+
+    if (!needsOriginDistrict || !originRegencyId) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ districts: unknown }>(`/regions/${originRegencyId}/districts`)
+      .then((response) => {
+        const items = normalizeCollection<DistrictOption>((response as any)?.districts);
+        setDistricts(
+          items.map((item) => ({
+            id: item.id,
+            code: item.code,
+            name: item.name,
+          }))
+        );
+      })
+      .catch(() => {
+        setDistricts([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [needsOriginDistrict, originRegencyId]);
+
+  useEffect(() => {
+    setOriginVillageId('');
+    setVillages([]);
+
+    if (!needsOriginVillage || !originDistrictId) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ villages: unknown }>(`/districts/${originDistrictId}/villages`)
+      .then((response) => {
+        const items = normalizeCollection<VillageOption>((response as any)?.villages);
+        setVillages(
+          items.map((item) => ({
+            id: item.id,
+            code: item.code,
+            name: item.name,
+          }))
+        );
+      })
+      .catch(() => {
+        setVillages([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [needsOriginVillage, originDistrictId]);
 
   const handleAnswer = (questionId: number, value: number) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }));
@@ -79,53 +268,147 @@ const EvaluasiForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     return { label: 'Kurang', color: 'text-red-600', class: 'text-slate-600' };
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!instansiData.nama) { toast.error("Mohon isi Nama Instansi"); return; }
-
-    // Save to SubmissionStore (Simulated Backend)
-    SubmissionStore.add({
-      type: 'evaluasi',
-      instansiName: instansiData.nama,
-      submitDate: new Date().toISOString(),
-      year: new Date().getFullYear(),
-      payload: {
-        instansiData,
-        clusters,
-        answers,
-        remarks,
-        score: calculateScore(),
-        category: getCategory(calculateScore())
-      }
-    });
-
-    toast.success("Laporan Evaluasi berhasil dikirim!");
-
-    // Simulate delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    setStep('RESULT');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // --- PDF GENERATION USING UTILITY ---
   const handleDownloadPDF = () => {
-    const score = calculateScore();
-    const category = getCategory(score);
-    
+    const score = resultScore ?? calculateScore();
+    const category = resultCategory ?? getCategory(score);
+
+    const instansiForPdf = {
+      ...instansiData,
+      // gunakan NAMA wilayah untuk ditampilkan di PDF
+      originRegencyName:
+        regencies.find((r) => String(r.id) === String(originRegencyId))?.name || null,
+      originDistrictName:
+        districts.find((d) => String(d.id) === String(originDistrictId))?.name || null,
+      originVillageName:
+        villages.find((v) => String(v.id) === String(originVillageId))?.name || null,
+    };
+
     generateEvaluasiPDF(
-      instansiData,
+      instansiForPdf,
       score,
       category,
       clusters,
       answers,
       remarks
     );
-    
+
     toast.success("File PDF berhasil diunduh!");
   };
 
-  // --- RENDER STEP 1: SELECTION ---
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInstansiData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instansiData.nama) { toast.error(`Mohon isi Nama ${instansiNoun}`); return; }
+    try {
+      const payloadAnswers = clusters.flatMap((cluster) =>
+        cluster.questions.map((q) => ({
+          question_id: q.id,
+          question_text: q.text,
+          answer_value: Number(answers[q.id] ?? 0),
+          remark: remarks[q.id] ?? undefined,
+        }))
+      );
+
+      if (payloadAnswers.length === 0) {
+        toast.error('Mohon isi minimal satu indikator evaluasi.');
+        return;
+      }
+
+      const requestBody = {
+        instansi_id: null,
+        instansi_name: instansiData.nama,
+        instansi_level_id: null,
+        instansi_level_text: instansiData.tingkat || null,
+        // kirim asal wilayah (ID) ke backend
+        origin_regency_id: originRegencyId || null,
+        origin_district_id: originDistrictId || null,
+        origin_village_id: originVillageId || null,
+        // data profil instansi
+        instansi_address: instansiData.alamat || null,
+        pejabat_nama: instansiData.pejabat || null,
+        // mapping jumlah pegawai ke field yang diharapkan backend
+        employee_male_count: instansiData.jmlLaki ? Number(instansiData.jmlLaki) : null,
+        employee_female_count: instansiData.jmlPerempuan ? Number(instansiData.jmlPerempuan) : null,
+        report_year: reportingYear,              // kalau kamu butuh, atau bisa dihapus jika backend tidak pakai
+        evaluation_date: instansiData.tanggal || null,
+        remarks: null as string | null,
+        answers: payloadAnswers,
+      };
+
+      const response = await apiClient.post<{ status: string; message?: string; data?: any }>(
+        '/evaluasi/submissions',
+        requestBody,
+      );
+
+      const submission = response?.data;
+
+      // Tentukan skor & kategori final yang akan dipakai di UI dan disimpan ke SubmissionStore
+      let finalScore: number | null = null;
+      let finalCategory: { label: string; color: string } | null = null;
+
+      if (submission) {
+        const backendScore = typeof submission.score === 'number' ? submission.score : null;
+        finalScore = backendScore;
+
+        let categoryFromBackend: { label: string; color: string } | null = null;
+        const catLabel: string | undefined =
+          submission.category?.label ?? submission.category_label ?? undefined;
+
+        if (backendScore !== null) {
+          categoryFromBackend = getCategory(backendScore);
+        } else if (catLabel) {
+          const lower = catLabel.toLowerCase();
+          if (lower === 'baik') categoryFromBackend = { label: 'Baik', color: 'text-emerald-600' };
+          else if (lower === 'cukup') categoryFromBackend = { label: 'Cukup', color: 'text-yellow-600' };
+          else categoryFromBackend = { label: catLabel, color: 'text-red-600' };
+        }
+
+        finalCategory = categoryFromBackend;
+      } else {
+        // Fallback ke perhitungan lokal jika tidak ada data backend
+        const localScore = calculateScore();
+        finalScore = localScore;
+        finalCategory = getCategory(localScore);
+      }
+
+      setResultScore(finalScore);
+      setResultCategory(finalCategory);
+
+      // Simpan juga ke SubmissionStore sebagai log lokal, termasuk skor & kategori final
+      SubmissionStore.add({
+        type: 'evaluasi',
+        instansiName: instansiData.nama,
+        submitDate: new Date().toISOString(),
+        year: reportingYear,
+        payload: {
+          instansiData,
+          origin: {
+            originRegencyId: originRegencyId || null,
+            originDistrictId: originDistrictId || null,
+            originVillageId: originVillageId || null,
+          },
+          clusters,
+          answers,
+          remarks,
+          score: finalScore,
+          category: finalCategory,
+          backend: response,
+        },
+      });
+
+      toast.success(response?.message || 'Laporan Evaluasi berhasil dikirim!');
+
+      setStep('RESULT');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error: any) {
+      const message = error?.data?.message || 'Gagal mengirim Laporan Evaluasi. Silakan coba lagi.';
+      toast.error(message);
+    }
+  };
+
   if (step === 'SELECTION') {
     return (
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto py-8 px-4">
@@ -145,256 +428,306 @@ const EvaluasiForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     );
   }
 
-  // --- RENDER STEP 3: RESULT ---
   if (step === 'RESULT') {
-    const score = calculateScore();
-    const category = getCategory(score);
-    
+    const score = resultScore ?? calculateScore();
+    const category = resultCategory ?? getCategory(score);
+
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen flex items-center justify-center py-10 px-4 bg-[#f6fbf9]">
         <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden relative border border-emerald-50">
-           
-           {/* Header Title */}
-           <div className="pt-12 pb-6 px-8 text-center">
-              <h1 className="text-3xl md:text-4xl font-bold text-emerald-700 uppercase leading-snug tracking-tight">
-                 FORM EVALUASI GERMAS DI <br/> TATANAN TEMPAT KERJA
-              </h1>
-              <h2 className="text-xl font-bold text-slate-800 mt-4">Provinsi Jawa Timur</h2>
-           </div>
+          <div className="pt-12 pb-6 px-8 text-center">
+            <h1 className="text-3xl md:text-4xl font-bold text-emerald-700 uppercase leading-snug tracking-tight">
+              FORM EVALUASI GERMAS DI <br/> TATANAN TEMPAT KERJA
+            </h1>
+            <h2 className="text-xl font-bold text-slate-800 mt-4">Provinsi Jawa Timur</h2>
+            <p className="text-lg font-semibold text-slate-700 mt-1">Tahun {reportingYear}</p>
+          </div>
 
-           {/* Green Container Box */}
-           <div className="mx-6 md:mx-12 mb-12 bg-emerald-50/60 rounded-3xl p-8 md:p-12 relative border border-emerald-100">
-              <h3 className="text-center text-2xl font-bold text-emerald-700 mb-10">Hasil Evaluasi</h3>
+          <div className="mx-6 md:mx-12 mb-12 bg-emerald-50/60 rounded-3xl p-8 md:p-12 relative border border-emerald-100">
+            <h3 className="text-center text-2xl font-bold text-emerald-700 mb-10">Hasil Evaluasi</h3>
 
-              {/* Detail Data Grid */}
-              <div className="grid grid-cols-1 gap-y-4 max-w-2xl mx-auto text-slate-800 text-lg">
-                 <div className="grid grid-cols-[220px,20px,1fr]">
-                    <span className="font-bold">Nama Instansi</span>
-                    <span>:</span>
-                    <span>{instansiData.nama}</span>
-                 </div>
-                 <div className="grid grid-cols-[220px,20px,1fr]">
-                    <span className="font-bold">Alamat Instansi</span>
-                    <span>:</span>
-                    <span>{instansiData.alamat || '-'}</span>
-                 </div>
-                 <div className="grid grid-cols-[220px,20px,1fr]">
-                    <span className="font-bold">Nama Pejabat/Pengelola</span>
-                    <span>:</span>
-                    <span>{instansiData.pejabat || '-'}</span>
-                 </div>
-                 <div className="grid grid-cols-[220px,20px,1fr]">
-                    <span className="font-bold">Jumlah Pekerja Laki-Laki</span>
-                    <span>:</span>
-                    <span>{instansiData.jmlLaki || '-'}</span>
-                 </div>
-                 <div className="grid grid-cols-[220px,20px,1fr]">
-                    <span className="font-bold">Jumlah Pekerja Perempuan</span>
-                    <span>:</span>
-                    <span>{instansiData.jmlPerempuan || '-'}</span>
-                 </div>
-                 <div className="grid grid-cols-[220px,20px,1fr]">
-                    <span className="font-bold">Hari, Tanggal</span>
-                    <span>:</span>
-                    <span>{instansiData.tanggal || new Date().toLocaleDateString('id-ID')}</span>
-                 </div>
-
-                 <div className="h-4"></div>
-
-                 <div className="grid grid-cols-[220px,20px,1fr] items-center">
-                    <span className="font-bold">Nilai Total</span>
-                    <span>:</span>
-                    <span className="text-xl">
-                       {score} <span className={`font-bold ${category.color}`}>({category.label})</span>
-                    </span>
-                 </div>
-
-                 <div className="h-2"></div>
-
-                 <div className="grid grid-cols-[220px,20px,1fr] items-start">
-                    <span className="font-bold">Kategori:</span>
-                    <span></span>
-                    <ul className="list-none space-y-1 text-base">
-                       <li>• <span className="font-medium">Kurang</span> : &lt;50% dari nilai total</li>
-                       <li>• <span className="font-medium">Cukup</span> : 50-75% dari nilai total</li>
-                       <li>• <span className="font-medium">Baik</span> : &gt;75% dari nilai total</li>
-                    </ul>
-                 </div>
+            <div className="grid grid-cols-1 gap-y-4 max-w-2xl mx-auto text-slate-800 text-lg">
+              <div className="grid grid-cols-[220px,20px,1fr]">
+                <span className="font-bold">Nama {instansiNoun}</span>
+                <span>:</span>
+                <span>{instansiData.nama}</span>
+              </div>
+              <div className="grid grid-cols-[220px,20px,1fr]">
+                <span className="font-bold">Alamat {instansiNoun}</span>
+                <span>:</span>
+                <span>{instansiData.alamat || '-'}</span>
+              </div>
+              <div className="grid grid-cols-[220px,20px,1fr]">
+                <span className="font-bold">Nama Pejabat/Pengelola</span>
+                <span>:</span>
+                <span>{instansiData.pejabat || '-'}</span>
+              </div>
+              <div className="grid grid-cols-[220px,20px,1fr]">
+                <span className="font-bold">Jumlah Pekerja Laki-Laki</span>
+                <span>:</span>
+                <span>{instansiData.jmlLaki || '-'}</span>
+              </div>
+              <div className="grid grid-cols-[220px,20px,1fr]">
+                <span className="font-bold">Jumlah Pekerja Perempuan</span>
+                <span>:</span>
+                <span>{instansiData.jmlPerempuan || '-'}</span>
+              </div>
+              <div className="grid grid-cols-[220px,20px,1fr]">
+                <span className="font-bold">Hari, Tanggal</span>
+                <span>:</span>
+                <span>{instansiData.tanggal || new Date().toLocaleDateString('id-ID')}</span>
               </div>
 
-              {/* Emerald Line Separator */}
-              <div className="mt-12 w-full h-px bg-emerald-200"></div>
-           </div>
+              <div className="h-4"></div>
 
-           {/* Footer Buttons */}
-           <div className="flex flex-col sm:flex-row justify-center gap-6 mb-12 px-8">
-              <Button 
-                 variant="outline" 
-                 onClick={handleDownloadPDF}
-                 className="border-emerald-600 text-emerald-700 bg-white hover:bg-emerald-50 px-8 py-3 h-auto text-lg rounded-lg min-w-[200px]"
-                 leftIcon={<Download className="w-5 h-5"/>}
-              >
-                 Unduh Hasil (PDF)
-              </Button>
-              <Button 
-                 onClick={onBack}
-                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 h-auto text-lg rounded-lg shadow-lg shadow-emerald-200 min-w-[200px]"
-              >
-                 Kembali ke Halaman Utama
-              </Button>
-           </div>
+              <div className="grid grid-cols-[220px,20px,1fr] items-center">
+                <span className="font-bold">Nilai Total</span>
+                <span>:</span>
+                <span className="text-xl">
+                  {score} <span className={`font-bold ${category.color}`}>({category.label})</span>
+                </span>
+              </div>
+            </div>
 
+            <div className="mt-12 w-full h-px bg-emerald-200"></div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-center gap-6 mb-12 px-8">
+            <Button 
+              variant="outline" 
+              onClick={handleDownloadPDF}
+              className="border-emerald-600 text-emerald-700 bg-white hover:bg-emerald-50 px-8 py-3 h-auto text-lg rounded-lg min-w-[200px]"
+              leftIcon={<Download className="w-5 h-5"/>}
+            >
+              Unduh Hasil (PDF)
+            </Button>
+            <Button 
+              onClick={onBack}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 h-auto text-lg rounded-lg shadow-lg shadow-emerald-200 min-w-[200px]"
+            >
+              Kembali ke Halaman Utama
+            </Button>
+          </div>
         </div>
       </motion.div>
     );
   }
 
-  // --- RENDER STEP 2: FORM INPUT (FORMULIR PAGE) ---
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-5xl mx-auto py-8 px-4">
       <div className="bg-white rounded-[2rem] shadow-xl overflow-hidden border border-emerald-200">
-         
-         {/* Header Title */}
-         <div className="bg-emerald-50 pt-10 pb-2 px-6 text-center">
-           <h1 className="text-2xl md:text-3xl font-bold text-emerald-700 uppercase leading-relaxed tracking-wide">
-              FORM EVALUASI GERMAS DI <br/> TATANAN TEMPAT KERJA
-            </h1>
-            <h2 className="text-lg md:text-xl font-bold text-emerald-700 mt-3 uppercase tracking-widest">
-               {instansiData.tingkat}
-            </h2>
-         </div>
+        {/* ... (Existing Code) */}
+        
+        <form onSubmit={handleSubmit} className="p-6 md:p-10">
+          {/* ... (Existing Form Code) */}
+          
+          {/* Box Identitas Instansi */}
+          <div className="bg-emerald-50 p-8 rounded-2xl mb-10 border border-emerald-100">
+            <div className="space-y-5">
+              {[
+                { label: `Nama ${instansiNoun}:`, name: 'nama', type: 'text' },
+                { label: `Alamat ${instansiNoun}:`, name: 'alamat', type: 'text' },
+                { label: 'Nama Pejabat/Pengelola:', name: 'pejabat', type: 'text' },
+                { label: 'Jumlah Pekerja Laki-Laki:', name: 'jmlLaki', type: 'number' },
+                { label: 'Jumlah Pekerja Perempuan:', name: 'jmlPerempuan', type: 'number' },
+              ].map((field) => (
+                <div key={field.name} className="grid md:grid-cols-[250px,1fr] items-center gap-2">
+                  <label className="font-medium text-emerald-800 text-base">{field.label}</label>
+                  <input 
+                    type={field.type}
+                    name={field.name}
+                    value={(instansiData as any)[field.name]} 
+                    onChange={handleInputChange} 
+                    min={field.type === 'number' ? 0 : undefined}
+                    className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-600 transition-all text-emerald-800"
+                    required={field.name === 'nama'}
+                  />
+                </div>
+              ))}
 
-         <form onSubmit={handleSubmit} className="p-6 md:p-10">
-            {/* ... (Existing Form Code) ... */}
-            
-            {/* Box Identitas Instansi */}
-            <div className="bg-emerald-50 p-8 rounded-2xl mb-10 border border-emerald-100">
-               <div className="space-y-5">
-                  {[
-                     { label: 'Nama Instansi:', name: 'nama', type: 'text' },
-                     { label: 'Alamat Instansi:', name: 'alamat', type: 'text' },
-                     { label: 'Nama Pejabat/Pengelola:', name: 'pejabat', type: 'text' },
-                     { label: 'Jumlah Pekerja Laki-Laki:', name: 'jmlLaki', type: 'number' },
-                     { label: 'Jumlah Pekerja Perempuan:', name: 'jmlPerempuan', type: 'number' },
-                  ].map((field) => (
-                     <div key={field.name} className="grid md:grid-cols-[250px,1fr] items-center gap-2">
-                        <label className="font-medium text-emerald-800 text-base">{field.label}</label>
-                        <input 
-                           type={field.type}
-                           name={field.name}
-                           value={(instansiData as any)[field.name]} 
-                           onChange={handleInputChange} 
-                           min={field.type === 'number' ? 0 : undefined}
-                           className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-600 transition-all text-emerald-800"
-                           required={field.name === 'nama'}
-                        />
-                     </div>
-                  ))}
-                  
-                  <div className="grid md:grid-cols-[250px,1fr] items-center gap-2">
-                     <label className="font-medium text-emerald-800 text-base">Hari, Tanggal:</label>
-                     <div className="relative max-w-[200px]">
-                        <input 
-                           type="date"
-                           name="tanggal"
-                           value={instansiData.tanggal}
-                           onChange={handleInputChange}
-                           className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-emerald-800"
-                        />
-                     </div>
-                  </div>
+              {needsOriginRegency && (
+                <div className="grid md:grid-cols-[250px,1fr] items-center gap-2">
+                  <label className="font-medium text-emerald-800 text-base">Asal Kab/Kota:</label>
+                  <select
+                    value={originRegencyId}
+                    onChange={(e) => setOriginRegencyId(e.target.value)}
+                    className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-600 transition-all text-emerald-800"
+                    disabled={regionLoading || regencies.length === 0}
+                  >
+                    <option value="">Pilih Kab/Kota</option>
+                    {regencies.map((item) => {
+                      const rawName = (item as any).name || '';
+                      const lowerName = rawName.toLowerCase();
+
+                      // 1) Deteksi tipe dari awalan nama (lebih dipercaya)
+                      let typeLabel: string | null = null;
+                      if (lowerName.startsWith('kota ')) typeLabel = 'Kota';
+                      else if (lowerName.startsWith('kabupaten ')) typeLabel = 'Kabupaten';
+
+                      // 2) Jika nama tidak mengandung awalan yang jelas, gunakan field type dari API
+                      if (!typeLabel) {
+                        const rawType = (item as any).type ? String((item as any).type).toLowerCase() : '';
+                        if (rawType.startsWith('kab')) typeLabel = 'Kabupaten';
+                        else if (rawType.startsWith('kot')) typeLabel = 'Kota';
+                      }
+
+                      const baseName = rawName
+                        .replace(/^Kabupaten\s+/i, '')
+                        .replace(/^Kota\s+/i, '')
+                        .trim();
+
+                      const label = typeLabel ? `${typeLabel} ${baseName}`.trim() : rawName;
+
+                      return (
+                        <option key={item.id} value={String(item.id)}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {needsOriginDistrict && (
+                <div className="grid md:grid-cols-[250px,1fr] items-center gap-2">
+                  <label className="font-medium text-emerald-800 text-base">Asal Kecamatan:</label>
+                  <select
+                    value={originDistrictId}
+                    onChange={(e) => setOriginDistrictId(e.target.value)}
+                    className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-600 transition-all text-emerald-800"
+                    disabled={regionLoading || !originRegencyId || districts.length === 0}
+                  >
+                    <option value="">Pilih Kecamatan</option>
+                    {districts.map((item) => (
+                      <option key={item.id} value={String(item.id)}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {needsOriginVillage && (
+                <div className="grid md:grid-cols-[250px,1fr] items-center gap-2">
+                  <label className="font-medium text-emerald-800 text-base">Asal Desa/Kelurahan:</label>
+                  <select
+                    value={originVillageId}
+                    onChange={(e) => setOriginVillageId(e.target.value)}
+                    className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-600 transition-all text-emerald-800"
+                    disabled={regionLoading || !originDistrictId || villages.length === 0}
+                  >
+                    <option value="">Pilih Desa/Kelurahan</option>
+                    {villages.map((item) => (
+                      <option key={item.id} value={String(item.id)}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid md:grid-cols-[250px,1fr] items-center gap-2">
+                <label className="font-medium text-emerald-800 text-base">Hari, Tanggal:</label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    name="tanggal"
+                    value={instansiData.tanggal}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border-2 border-emerald-400 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-emerald-800"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Title Section */}
+          <div className="text-center mb-8">
+             <h3 className="text-xl font-bold text-slate-700 uppercase tracking-widest mb-1">IMPLEMENTASI GERMAS DI TEMPAT KERJA</h3>
+             <p className="text-lg font-bold text-slate-700">Tahun {reportingYear}</p>
+          </div>
+
+          {/* Clusters Loop (Dynamic from Store) */}
+          <div className="space-y-10">
+             {clusters.length > 0 ? clusters.map((cluster, cIdx) => (
+                <div key={cluster.id} className="space-y-4">
+                   <h4 className={`text-lg font-bold ${cIdx >= 2 ? 'text-slate-800 uppercase text-center mt-8' : 'text-emerald-600'}`}>
+                      {cluster.title}
+                   </h4>
+                   
+                   <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                         <thead>
+                            <tr className="border-b border-emerald-600">
+                               <th className="py-3 px-2 font-normal text-slate-700 w-[50%] text-center">Indikator Evaluasi</th>
+                               <th className="py-3 px-2 font-normal text-slate-700 w-[10%] text-center border-l border-emerald-600">Ya/Ada</th>
+                               <th className="py-3 px-2 font-normal text-slate-700 w-[10%] text-center border-l border-emerald-600 leading-tight">Tidak<br/>ada</th>
+                               <th className="py-3 px-2 font-normal text-slate-700 w-[30%] text-left pl-4 border-l border-emerald-600">Keterangan</th>
+                            </tr>
+                         </thead>
+                         <tbody>
+                            {cluster.questions.map((q, qIdx) => (
+                               <tr key={q.id} className="hover:bg-slate-50">
+                                  <td className="py-4 px-2 align-top text-slate-800">
+                                     <div className="flex gap-2">
+                                        <span>{qIdx + 1}.</span>
+                                        <span>{q.text}</span>
+                                     </div>
+                                  </td>
+                                  
+                                  <td className="py-4 px-2 align-top text-center border-l border-emerald-600">
+                                     <div 
+                                        onClick={() => handleAnswer(q.id, 1)}
+                                        className="flex items-center justify-center h-full cursor-pointer"
+                                     >
+                                        <div className={`w-8 h-8 rounded-full border-2 border-emerald-600 flex items-center justify-center transition-colors ${answers[q.id] === 1 ? 'bg-emerald-100' : 'bg-white'}`}>
+                                           {answers[q.id] === 1 && <div className="w-4 h-4 bg-emerald-600 rounded-full"></div>}
+                                        </div>
+                                     </div>
+                                  </td>
+
+                                  <td className="py-4 px-2 align-top text-center border-l border-emerald-600">
+                                     <div 
+                                        onClick={() => handleAnswer(q.id, 0)}
+                                        className="flex items-center justify-center h-full cursor-pointer"
+                                     >
+                                        <div className={`w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center transition-colors ${answers[q.id] === 0 ? 'bg-red-50' : 'bg-white'}`}>
+                                           {answers[q.id] === 0 && <div className="w-4 h-4 bg-red-500 rounded-full"></div>}
+                                        </div>
+                                     </div>
+                                  </td>
+
+                                  <td className="py-4 px-4 align-top border-l border-emerald-600">
+                                     <input 
+                                        type="text" 
+                                        placeholder="Ket."
+                                        className="w-full border-b border-slate-400 focus:border-emerald-600 outline-none py-1 bg-transparent text-slate-700"
+                                        value={remarks[q.id] || ''}
+                                        onChange={(e) => handleRemarkChange(q.id, e.target.value)}
+                                     />
+                                  </td>
+                               </tr>
+                            ))}
+                         </tbody>
+                      </table>
+                   </div>
+                   <div className="w-full h-px bg-emerald-200 mt-2"></div>
+                   <div className="text-xs text-slate-500 font-bold pl-2">*Nilai: <span className="ml-2 font-normal">Ya = 1; Tidak = 0</span></div>
+                   {cIdx < 2 && <div className="text-xs text-slate-500 pl-14">Per-Kluster = 100</div>}
+                </div>
+             )) : (
+               <div className="text-center p-8 bg-slate-50 rounded-lg text-slate-500">
+                  Belum ada data indikator untuk tingkat instansi ini.
                </div>
-            </div>
-
-            {/* Title Section */}
-            <div className="text-center mb-8">
-               <h3 className="text-xl font-bold text-slate-700 uppercase tracking-widest mb-1">IMPLEMENTASI GERMAS DI TEMPAT KERJA</h3>
-            </div>
-
-            {/* Clusters Loop (Dynamic from Store) */}
-            <div className="space-y-10">
-               {clusters.length > 0 ? clusters.map((cluster, cIdx) => (
-                  <div key={cluster.id} className="space-y-4">
-                     <h4 className={`text-lg font-bold ${cIdx >= 2 ? 'text-slate-800 uppercase text-center mt-8' : 'text-emerald-600'}`}>
-                        {cluster.title}
-                     </h4>
-                     
-                     <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                           <thead>
-                              <tr className="border-b border-emerald-600">
-                                 <th className="py-3 px-2 font-normal text-slate-700 w-[50%] text-center">Indikator Evaluasi</th>
-                                 <th className="py-3 px-2 font-normal text-slate-700 w-[10%] text-center border-l border-emerald-600">Ya/Ada</th>
-                                 <th className="py-3 px-2 font-normal text-slate-700 w-[10%] text-center border-l border-emerald-600 leading-tight">Tidak<br/>ada</th>
-                                 <th className="py-3 px-2 font-normal text-slate-700 w-[30%] text-left pl-4 border-l border-emerald-600">Keterangan</th>
-                              </tr>
-                           </thead>
-                           <tbody>
-                              {cluster.questions.map((q, qIdx) => (
-                                 <tr key={q.id} className="hover:bg-slate-50">
-                                    <td className="py-4 px-2 align-top text-slate-800">
-                                       <div className="flex gap-2">
-                                          <span>{qIdx + 1}.</span>
-                                          <span>{q.text}</span>
-                                       </div>
-                                    </td>
-                                    
-                                    {/* Yes Radio */}
-                                    <td className="py-4 px-2 align-top text-center border-l border-emerald-600">
-                                       <div 
-                                          onClick={() => handleAnswer(q.id, 1)}
-                                          className="flex items-center justify-center h-full cursor-pointer"
-                                       >
-                                          <div className={`w-8 h-8 rounded-full border-2 border-emerald-600 flex items-center justify-center transition-colors ${answers[q.id] === 1 ? 'bg-emerald-100' : 'bg-white'}`}>
-                                             {answers[q.id] === 1 && <div className="w-4 h-4 bg-emerald-600 rounded-full"></div>}
-                                          </div>
-                                       </div>
-                                    </td>
-
-                                    {/* No Radio */}
-                                    <td className="py-4 px-2 align-top text-center border-l border-emerald-600">
-                                       <div 
-                                          onClick={() => handleAnswer(q.id, 0)}
-                                          className="flex items-center justify-center h-full cursor-pointer"
-                                       >
-                                          <div className={`w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center transition-colors ${answers[q.id] === 0 ? 'bg-red-50' : 'bg-white'}`}>
-                                             {answers[q.id] === 0 && <div className="w-4 h-4 bg-red-500 rounded-full"></div>}
-                                          </div>
-                                       </div>
-                                    </td>
-
-                                    {/* Keterangan Input */}
-                                    <td className="py-4 px-4 align-top border-l border-emerald-600">
-                                       <input 
-                                          type="text" 
-                                          placeholder="Ket."
-                                          className="w-full border-b border-slate-400 focus:border-emerald-600 outline-none py-1 bg-transparent text-slate-700"
-                                          value={remarks[q.id] || ''}
-                                          onChange={(e) => handleRemarkChange(q.id, e.target.value)}
-                                       />
-                                    </td>
-                                 </tr>
-                              ))}
-                           </tbody>
-                        </table>
-                     </div>
-                     <div className="w-full h-px bg-emerald-200 mt-2"></div>
-                     <div className="text-xs text-slate-500 font-bold pl-2">*Nilai: <span className="ml-2 font-normal">Ya = 1; Tidak = 0</span></div>
-                     {cIdx < 2 && <div className="text-xs text-slate-500 pl-14">Per-Kluster = 100</div>}
-                  </div>
-               )) : (
-                 <div className="text-center p-8 bg-slate-50 rounded-lg text-slate-500">
-                    Belum ada data indikator untuk tingkat instansi ini.
-                 </div>
-               )}
-            </div>
+             )}
+          </div>
 
             {/* NB Section */}
             <div className="mt-12 bg-[#f0fbf7] rounded-xl p-6 border border-emerald-100">
                <span className="font-bold text-slate-800 block mb-2">NB:</span>
                <ul className="list-disc pl-5 space-y-1 text-sm text-slate-700 leading-relaxed">
                   <li>Untuk Tempat kerja yang hanya berlantai 1 maka indikator menganjurkan penggunaan tangga daripada lift nilainya 1</li>
-                  <li>Bagi instansi yang tidak membutuhkan APD bisa mengisi kolom keterangan dengan N/A atau (-)</li>
+                  <li>{isCompanyLevel ? 'Bagi perusahaan' : 'Bagi instansi'} yang tidak membutuhkan APD bisa mengisi kolom keterangan dengan N/A atau (-)</li>
                   <li>Menyediakan sarana sanitasi aman yang responsif terhadap GEDSI berarti memastikan fasilitas sanitasi dapat diakses, digunakan, dan dirasakan manfaatnya oleh semua pekerja tanpa kecuali, termasuk perempuan, penyandang disabilitas, serta kelompok dengan kebutuhan khusus. Pendekatan ini menekankan kesetaraan dan inklusi sosial, sehingga tidak ada kelompok yang terpinggirkan dalam pemenuhan hak dasar atas kesehatan dan kebersihan di tempat kerja.</li>
                </ul>
             </div>
@@ -409,128 +742,341 @@ const EvaluasiForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   );
 };
 
-
-// ==========================================
-// COMPONENT: LAPORAN FORM (DYNAMIC)
 // ==========================================
 type LaporanStep = 'LEVEL_SELECT' | 'INSTANSI_SELECT' | 'FORM_INPUT' | 'SUCCESS';
 
 const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [step, setStep] = useState<LaporanStep>('LEVEL_SELECT');
   const [selectedLevel, setSelectedLevel] = useState<string>('');
+  const [selectedInstansiLevel, setSelectedInstansiLevel] = useState<string>('INSTANSI TINGKAT PROVINSI');
   const [selectedInstansiId, setSelectedInstansiId] = useState<string>('');
   const [template, setTemplate] = useState<LaporanTemplate | null>(null);
-  
+
+  const [regencies, setRegencies] = useState<RegencyOption[]>([]);
+  const [originRegencyId, setOriginRegencyId] = useState('');
+  const [regionLoading, setRegionLoading] = useState(false);
+
+  const [instansiOptions, setInstansiOptions] = useState<{ id: number; name: string; slug?: string }[]>([]);
+  const [instansiLoading, setInstansiLoading] = useState(false);
+
+  const LAPORAN_LEVELS: { label: string; value: string }[] = [
+    { label: 'Tingkat Provinsi Jawa Timur', value: 'INSTANSI TINGKAT PROVINSI' },
+    { label: 'Tingkat Kabupaten / Kota', value: 'INSTANSI TINGKAT KABUPATEN / KOTA' },
+  ];
+
   // State to hold dynamic inputs
   const [laporanInputs, setLaporanInputs] = useState<Record<string, any>>({});
 
   const navigate = useNavigate();
 
-  // ... (Existing Select Handlers) ...
+  const reportingYear = getReportingYear();
+
+  const LEVEL_TO_ID: Record<string, number> = {
+    'INSTANSI TINGKAT PROVINSI': 1,
+    'INSTANSI TINGKAT KABUPATEN / KOTA': 2,
+    'INSTANSI TINGKAT KECAMATAN': 3,
+    'INSTANSI TINGKAT KELURAHAN / DESA': 4,
+    'INSTANSI TINGKAT PERUSAHAAN': 5,
+  };
+
+  // Load daftar instansi dari backend berdasarkan level terpilih
+  useEffect(() => {
+    if (!selectedInstansiLevel) {
+      setInstansiOptions([]);
+      setSelectedInstansiId('');
+
+      return;
+    }
+
+    const levelId = LEVEL_TO_ID[selectedInstansiLevel] ?? null;
+
+    setInstansiLoading(true);
+    apiClient
+      .get<any>('/instansi', {
+        query: {
+          instansi_level_id: levelId || undefined,
+        },
+      })
+      .then((resp) => {
+        const raw: any[] = (resp as any)?.data ?? [];
+        if (raw.length > 0) {
+          setInstansiOptions(
+            raw.map((item) => ({
+              id: Number(item.id),
+              name: String(item.name ?? 'Instansi'),
+              slug: item.slug ? String(item.slug) : undefined,
+            })),
+          );
+        } else {
+          // Fallback ke daftar statis jika backend belum menyediakan data instansi
+          setInstansiOptions(
+            INSTANSI_LIST.map((item) => ({
+              id: (item as any).id,
+              name: String(item.name),
+              slug: undefined,
+            })),
+          );
+        }
+      })
+      .catch(() => {
+        // Jika request gagal (misalnya CORS), fallback ke daftar statis
+        setInstansiOptions(
+          INSTANSI_LIST.map((item) => ({
+            id: (item as any).id,
+            name: String(item.name),
+            slug: undefined,
+          })),
+        );
+      })
+      .finally(() => setInstansiLoading(false));
+  }, [selectedInstansiLevel]);
+
   const handleLevelSelect = (level: string) => {
     setSelectedLevel(level);
+    setSelectedInstansiLevel(level);
+    setSelectedInstansiId('');
+    setOriginRegencyId('');
+    setTemplate(null);
+    setLaporanInputs({});
     setStep('INSTANSI_SELECT');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleInstansiSubmit = () => {
-    if (!selectedInstansiId) {
-      toast.error("Silakan pilih instansi terlebih dahulu");
+  const isKabKotaLevel = selectedInstansiLevel.toUpperCase().includes('KABUPATEN') || selectedInstansiLevel.toUpperCase().includes('KOTA');
+
+  // Load daftar kab/kota khusus untuk LaporanForm ketika tingkat instansi Kab/Kota
+  useEffect(() => {
+    if (!isKabKotaLevel) {
+      setRegencies([]);
+      setOriginRegencyId('');
       return;
     }
-    
-    // Fetch Template from Store
-    const loadedTemplate = FormStore.getLaporanTemplate(selectedInstansiId);
-    setTemplate(loadedTemplate);
+
+    // Jika sudah ada data, tidak perlu fetch ulang
+    if (regencies.length > 0) {
+      return;
+    }
+
+    setRegionLoading(true);
+    apiClient
+      .get<{ regencies: unknown }>('/regions', { query: { province_code: '35' } })
+      .then((response) => {
+        const items = normalizeCollection<RegencyOption>((response as any)?.regencies);
+        setRegencies(
+          items.map((item) => ({
+            id: item.id,
+            code: item.code,
+            name: item.name,
+            type: (item as any).type,
+          })),
+        );
+      })
+      .catch(() => {
+        setRegencies([]);
+      })
+      .finally(() => setRegionLoading(false));
+  }, [isKabKotaLevel, regencies.length]);
+
+  const normalizeCollection = <T,>(collection: unknown): T[] => {
+    if (Array.isArray(collection)) {
+      return collection as T[];
+    }
+
+    if (collection && typeof collection === 'object' && Array.isArray((collection as any).data)) {
+      return (collection as any).data as T[];
+    }
+
+    return [];
+  };
+
+  const handleInstansiSubmit = async () => {
+    if (!selectedInstansiId) return;
+
+    if (isKabKotaLevel && !originRegencyId) return;
+
+    const originRegencyName = isKabKotaLevel
+      ? (regencies.find((r) => String(r.id) === String(originRegencyId))?.name ?? '')
+      : '';
+
+    // Simpan info asal kab/kota ke input laporan
+    setLaporanInputs((prev) => ({
+      ...prev,
+      originRegencyId: originRegencyId || undefined,
+      originRegencyName: originRegencyName || undefined,
+    }));
+
+    // 1) Coba ambil template dari backend agar global antar perangkat, per tingkat instansi
+    try {
+      const levelId = LEVEL_TO_ID[selectedInstansiLevel] ?? null;
+      const selectedInstansi = instansiOptions.find((i) => String(i.id) === selectedInstansiId);
+      const selectedInstansiName = selectedInstansi?.name || 'Instansi';
+      const instansiSlug = selectedInstansi?.slug || slugifyInstansi(selectedInstansiName);
+
+      const resp = await apiClient.get<any>('/templates/laporan', {
+        query: {
+          year: reportingYear,
+          instansi_level_id: levelId || undefined,
+          instansi_slug: instansiSlug,
+        },
+      });
+
+      const rawTemplates: any[] = (resp as any)?.data ?? [];
+
+      // Untuk saat ini, ambil template pertama yang aktif sebagai dasar
+      const baseTemplate = rawTemplates[0];
+
+      const mappedTemplate: LaporanTemplate = {
+        instansiId: selectedInstansiId,
+        instansiName: selectedInstansiName || baseTemplate?.name || 'Instansi',
+        level: selectedInstansiLevel,
+        sections: Array.isArray(baseTemplate?.sections)
+          ? baseTemplate.sections.map((section: any) => ({
+              id: String(section.id ?? section.code ?? ''),
+              title: String(section.title ?? ''),
+              indicator: String(section.indicator ?? ''),
+              hasTarget: Boolean(section.has_target ?? section.hasTarget ?? true),
+              hasBudget: Boolean(section.has_budget ?? section.hasBudget ?? true),
+            }))
+          : [],
+      };
+
+      setTemplate(mappedTemplate);
+    } catch (error) {
+      console.error('Gagal memuat template laporan dari server, fallback ke FormStore lokal', error);
+      const fallback = FormStore.getLaporanTemplate(selectedInstansiId, selectedInstansiLevel);
+      setTemplate(fallback);
+    }
 
     setStep('FORM_INPUT');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleLaporanInput = (sectionId: string, field: string, value: string) => {
-     setLaporanInputs(prev => ({
-        ...prev,
-        [`${sectionId}-${field}`]: value
-     }));
+    setLaporanInputs(prev => ({
+      ...prev,
+      [`${sectionId}-${field}`]: value,
+    }));
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!template) return;
+    try {
+      const sectionsPayload = template.sections.map((section) => {
+        const baseKey = section.id;
 
-    // Save to SubmissionStore
-    SubmissionStore.add({
-      type: 'laporan',
-      instansiName: template.instansiName,
-      submitDate: new Date().toISOString(),
-      year: 2026, // As hardcoded in the form
-      payload: {
-        template,
-        level: selectedLevel,
-        laporanInputs,
-        year: 2026
-      }
-    });
+        return {
+          section_id: (section as any).id ?? null,
+          section_code: (section as any).code ?? null,
+          section_title: section.title,
+          target_year: (laporanInputs[`${baseKey}-target-year`] as string) || null,
+          target_semester_1: (laporanInputs[`${baseKey}-target-sem1`] as string) || null,
+          target_semester_2: (laporanInputs[`${baseKey}-target-sem2`] as string) || null,
+          budget_year: (laporanInputs[`${baseKey}-budget-year`] as string) || null,
+          budget_semester_1: (laporanInputs[`${baseKey}-budget-sem1`] as string) || null,
+          budget_semester_2: (laporanInputs[`${baseKey}-budget-sem2`] as string) || null,
+          notes: (laporanInputs[`${baseKey}-notes`] as string) || null,
+        };
+      });
 
-    toast.success("Laporan Kegiatan berhasil dikirim!");
+      const requestBody = {
+        template_id: (template as any).id ?? null,
+        instansi_id: null,
+        instansi_name: template.instansiName,
+        instansi_level_id: null,
+        instansi_level_text: selectedInstansiLevel,
+        // kirim asal kab/kota instansi
+        origin_regency_id: laporanInputs.originRegencyId || null,
+        origin_regency_name: laporanInputs.originRegencyName || null,
+        report_year: reportingYear,
+        report_level: selectedInstansiLevel,
+        notes: null as string | null,
+        sections: sectionsPayload,
+      };
 
-    // Simulate delay
-    await new Promise(resolve => setTimeout(resolve, 800));
+      const response = await apiClient.post<{ status: string; message?: string; data?: unknown }>(
+        '/laporan/submissions',
+        requestBody,
+      );
 
-    setStep('SUCCESS');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+      // Optional: simpan juga ke SubmissionStore sebagai log lokal
+      SubmissionStore.add({
+        type: 'laporan',
+        instansiName: template.instansiName,
+        submitDate: new Date().toISOString(),
+        year: reportingYear,
+        payload: {
+          template,
+          level: selectedInstansiLevel,
+          laporanInputs,
+          backend: response,
+        },
+      });
+
+      toast.success((response as any)?.message || 'Laporan Kegiatan berhasil dikirim!');
+
+      setStep('SUCCESS');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error: any) {
+      const message = error?.data?.message || 'Gagal mengirim Laporan Kegiatan. Silakan coba lagi.';
+      toast.error(message);
+    }
   };
 
   const handleDownloadPDF = () => {
     if (!template) return;
-    
+
+    const originName: string | undefined = laporanInputs.originRegencyName;
+
     generateLaporanPDF(
       template,
-      selectedLevel,
+      originName,
       laporanInputs,
-      '2026'
+      String(reportingYear)
     );
-    
+
     toast.success("Laporan PDF berhasil diunduh!");
   };
 
   // ... (Keep existing Renders 1, 2, 3, 4 unchanged logic-wise) ...
-  
+
   // 1. HALAMAN PILIH TINGKAT (No changes)
   if (step === 'LEVEL_SELECT') {
     return (
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto py-12 px-4">
-         <Card className="bg-white rounded-[2.5rem] shadow-xl border border-emerald-50 overflow-hidden pb-12 pt-8">
-            <div className="text-center px-4 mb-10">
-               <h1 className="text-3xl md:text-4xl font-bold text-emerald-700 uppercase leading-snug mb-4">
-                  Form Laporan Pemantauan<br/>Semesteran dan Tahunan<br/>Kegiatan Germas
-               </h1>
-               <h2 className="text-xl font-bold text-slate-700">Provinsi Jawa Timur</h2>
-               <div className="mt-10 mb-6 text-lg font-medium text-slate-600">Pilih tingkat instansi:</div>
-               
-               <div className="flex flex-col gap-6 max-w-md mx-auto">
-                  <button 
-                     onClick={() => handleLevelSelect('Provinsi')}
-                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-5 px-8 rounded-xl shadow-lg hover:shadow-emerald-200 hover:-translate-y-1 transition-all duration-300 border-2 border-emerald-600"
-                  >
-                     Tingkat Provinsi Jawa Timur
-                  </button>
-                  
-                  <div className="flex items-center gap-4 text-slate-400">
-                     <div className="h-px bg-slate-300 flex-1"></div>
-                     <span className="text-sm uppercase tracking-widest font-semibold">Atau</span>
-                     <div className="h-px bg-slate-300 flex-1"></div>
-                  </div>
+        <Card className="bg-white rounded-[2.5rem] shadow-xl border border-emerald-50 overflow-hidden pb-12 pt-8">
+          <div className="text-center px-4 mb-10">
+            <h1 className="text-3xl md:text-4xl font-bold text-emerald-700 uppercase leading-snug mb-4">
+              Form Laporan Pemantauan<br/>Semesteran dan Tahunan<br/>Kegiatan Germas
+            </h1>
+            <h2 className="text-xl font-bold text-slate-700">Provinsi Jawa Timur</h2>
+            <div className="mt-10 mb-6 text-lg font-medium text-slate-600">Pilih tingkat instansi:</div>
 
-                  <button 
-                     onClick={() => handleLevelSelect('Kab/Kota')}
-                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-5 px-8 rounded-xl shadow-lg hover:shadow-emerald-200 hover:-translate-y-1 transition-all duration-300 border-2 border-emerald-600"
-                  >
-                     Tingkat Kabupaten / Kota
-                  </button>
-               </div>
+            <div className="max-w-xl mx-auto">
+              <Button
+                type="button"
+                onClick={() => handleLevelSelect(LAPORAN_LEVELS[0].value)}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-5 rounded-xl text-lg shadow-lg shadow-emerald-200"
+              >
+                {LAPORAN_LEVELS[0].label}
+              </Button>
+
+              <div className="flex items-center gap-4 my-6">
+                <div className="flex-1 h-px bg-slate-200" />
+                <div className="text-xs font-bold text-slate-400 tracking-widest">ATAU</div>
+                <div className="flex-1 h-px bg-slate-200" />
+              </div>
+
+              <Button
+                type="button"
+                onClick={() => handleLevelSelect(LAPORAN_LEVELS[1].value)}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-5 rounded-xl text-lg shadow-lg shadow-emerald-200"
+              >
+                {LAPORAN_LEVELS[1].label}
+              </Button>
             </div>
-         </Card>
+          </div>
+        </Card>
       </motion.div>
     );
   }
@@ -544,21 +1090,49 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                <h1 className="text-2xl md:text-3xl font-bold text-emerald-700 uppercase leading-snug mb-3">
                   Form Laporan Pemantauan<br/>Semesteran dan Tahunan<br/>Kegiatan Germas
                </h1>
-               <h2 className="text-lg font-bold text-slate-700 uppercase tracking-widest mb-12">
-                  Instansi {selectedLevel === 'Provinsi' ? 'Tingkat Provinsi' : 'Tingkat Kab/Kota'}
-               </h2>
+                <h2 className="text-lg font-bold text-slate-700 uppercase tracking-widest mb-2">
+                   {selectedInstansiLevel}
+                </h2>
+                <h2 className="text-lg font-bold text-slate-700 uppercase tracking-widest mb-10">
+                   Tahun {reportingYear}
+                </h2>
 
-               <div className="mb-8">
+                <div className="mb-8">
+                  {isKabKotaLevel && (
+                    <div className="mb-8">
+                      <label className="block text-lg font-medium text-slate-600 mb-4">Asal Kab/Kota instansi:</label>
+                      <div className="relative">
+                        <select
+                          value={originRegencyId}
+                          onChange={(e) => setOriginRegencyId(e.target.value)}
+                          className="w-full appearance-none bg-white border-2 border-emerald-500 text-slate-700 py-4 px-6 pr-12 rounded-xl text-lg font-medium focus:outline-none focus:ring-4 focus:ring-emerald-100 cursor-pointer shadow-sm hover:border-emerald-600 transition-colors"
+                          disabled={regionLoading || regencies.length === 0}
+                        >
+                          <option value="">Pilih Kab/Kota</option>
+                          {regencies.map((item) => (
+                            <option key={item.id} value={String(item.id)}>
+                              {item.name.replace('Kabupaten ', '').replace('Kota ', '')}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                      </div>
+                    </div>
+                  )}
+
                   <label className="block text-lg font-medium text-slate-600 mb-4">Pilih instansi:</label>
                   <div className="relative">
                      <select 
                         value={selectedInstansiId}
                         onChange={(e) => setSelectedInstansiId(e.target.value)}
-                        className="w-full appearance-none bg-white border-2 border-emerald-500 text-slate-700 py-4 px-6 pr-12 rounded-xl text-lg font-medium focus:outline-none focus:ring-4 focus:ring-emerald-100 cursor-pointer shadow-sm hover:border-emerald-600 transition-colors"
+                        disabled={instansiLoading || instansiOptions.length === 0}
+                        className="w-full appearance-none bg-white border-2 border-emerald-500 text-slate-700 py-4 px-6 pr-12 rounded-xl text-lg font-medium focus:outline-none focus:ring-4 focus:ring-emerald-100 cursor-pointer shadow-sm hover:border-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                      >
-                        <option value="" disabled>Jenis Instansi</option>
-                        {INSTANSI_LIST.map(inst => (
-                           <option key={inst.id} value={inst.id}>{inst.name}</option>
+                        <option value="" disabled>
+                          {instansiLoading ? 'Memuat instansi...' : 'Jenis Instansi'}
+                        </option>
+                        {instansiOptions.map(inst => (
+                           <option key={inst.id} value={String(inst.id)}>{inst.name}</option>
                         ))}
                      </select>
                      <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 w-6 h-6 text-emerald-600 pointer-events-none" />
@@ -569,7 +1143,7 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                <div className="flex flex-col gap-4 mt-8 max-w-xs mx-auto">
                   <Button 
                      onClick={handleInstansiSubmit}
-                     disabled={!selectedInstansiId}
+                     disabled={!selectedInstansiId || (isKabKotaLevel && !originRegencyId)}
                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg shadow-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                      Lanjutkan
@@ -600,9 +1174,9 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   </h1>
                   <div className="mt-4 space-y-1">
                      <h2 className="text-lg font-bold text-slate-800 uppercase">
-                        {selectedLevel === 'Provinsi' ? 'Instansi Tingkat Provinsi' : 'Instansi Tingkat Kab/Kota'}
+                        {selectedInstansiLevel}
                      </h2>
-                     <p className="text-lg font-bold text-slate-800">Tahun 2026</p>
+                     <p className="text-lg font-bold text-slate-700">Tahun {reportingYear}</p>
                   </div>
                   
                   <div className="mt-8 bg-emerald-50 rounded-xl py-6 px-4 border border-emerald-100">
@@ -705,7 +1279,7 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                      </div>
                   )) : (
                     <div className="text-center p-8 bg-white rounded-2xl border border-slate-200">
-                       <p className="text-slate-500">Belum ada konfigurasi kegiatan untuk instansi ini.</p>
+                       Belum ada konfigurasi kegiatan untuk instansi ini.
                     </div>
                   )}
                </div>
@@ -716,13 +1290,14 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                      type="button" 
                      variant="outline" 
                      onClick={() => setStep('INSTANSI_SELECT')}
-                     className="px-8 py-3 h-auto text-emerald-600 border-emerald-200 hover:bg-emerald-50 rounded-lg font-medium"
+                     className="px-8 py-3 h-auto text-emerald-600 border-emerald-200 hover:bg-emerald-50 rounded-lg font-bold text-lg"
+                     leftIcon={<ArrowLeft className="w-5 h-5"/>}
                    >
                      Kembali
                    </Button>
                    <Button 
                      type="submit" 
-                     className="px-10 py-3 h-auto bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-lg shadow-emerald-200"
+                     className="px-10 py-3 h-auto bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-lg shadow-lg shadow-emerald-200"
                    >
                      Kirim Laporan
                    </Button>
@@ -743,10 +1318,10 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   Form Laporan Pemantauan<br/>Semesteran dan Tahunan<br/>Kegiatan Germas
                </h1>
                 <h2 className="text-lg font-bold text-slate-700 uppercase tracking-widest mb-2">
-                   Instansi {selectedLevel === 'Provinsi' ? 'Tingkat Provinsi' : 'Tingkat Kab/Kota'}
+                   {selectedInstansiLevel}
                 </h2>
                 <h2 className="text-lg font-bold text-slate-700 uppercase tracking-widest mb-10">
-                   Tahun 2026
+                   Tahun {reportingYear}
                 </h2>
 
                 <div className="bg-emerald-50/70 rounded-3xl p-10 mb-10 max-w-2xl mx-auto border border-emerald-100">
@@ -755,7 +1330,7 @@ const LaporanForm: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                    <h3 className="text-xl font-bold text-emerald-600 mb-4 uppercase tracking-widest">Laporan Terkirim!</h3>
                    
                    <p className="text-slate-600 text-lg leading-relaxed mb-6">
-                      Terima Kasih telah mengirim <strong>Laporan Pemantauan Semesteran dan Tahunan Kegiatan Germas {template.instansiName}</strong> pada <strong>Tahun 2026</strong>.
+                      Terima Kasih telah mengirim <strong>Laporan Pemantauan Semesteran dan Tahunan Kegiatan Germas {template.instansiName}</strong> pada <strong>Tahun {reportingYear}</strong>.
                    </p>
                    
                    <div className="w-full h-px bg-emerald-200 mb-4"></div>

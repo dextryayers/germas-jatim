@@ -16,6 +16,8 @@ class LaporanSubmissionResource extends JsonResource
             'instansi_name' => $this->instansi_name,
             'instansi_level_id' => $this->instansi_level_id,
             'instansi_level_text' => $this->instansi_level_text,
+            'origin_regency_id' => $this->origin_regency_id,
+            'origin_regency_name' => $this->origin_regency_name,
             'report_year' => $this->report_year,
             'report_level' => $this->report_level,
             'status' => $this->status,

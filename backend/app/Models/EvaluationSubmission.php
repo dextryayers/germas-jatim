@@ -17,6 +17,9 @@ class EvaluationSubmission extends Model
         'instansi_name',
         'instansi_level_id',
         'instansi_level_text',
+        'origin_regency_id',
+        'origin_district_id',
+        'origin_village_id',
         'instansi_address',
         'pejabat_nama',
         'pejabat_jabatan',
@@ -42,6 +45,21 @@ class EvaluationSubmission extends Model
         'employee_female_count' => 'integer',
         'score' => 'integer',
     ];
+
+    public function originRegency(): BelongsTo
+    {
+        return $this->belongsTo(Regency::class, 'origin_regency_id');
+    }
+
+    public function originDistrict(): BelongsTo
+    {
+        return $this->belongsTo(District::class, 'origin_district_id');
+    }
+
+    public function originVillage(): BelongsTo
+    {
+        return $this->belongsTo(Village::class, 'origin_village_id');
+    }
 
     public function instansi(): BelongsTo
     {

@@ -4,6 +4,7 @@ import { LayoutDashboard, Users, Settings, Menu, FileCheck, Home, FileText, Chev
 import { Button } from '../../components/ui/Button';
 import { showConfirmation, showSuccess } from '../../utils/alerts';
 import logoGermas from '../../components/svg/logo-germas.svg';
+import { apiClient } from '../../utils/apiClient';
 
 const AdminLayout: React.FC = () => {
   const location = useLocation();
@@ -20,8 +21,70 @@ const AdminLayout: React.FC = () => {
     setMobileOpen(false);
   }, [location]);
 
-  const userName = useMemo(() => sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name') ?? 'Administrator', []);
-  const userEmail = useMemo(() => sessionStorage.getItem('user_email') ?? localStorage.getItem('user_email') ?? 'admin@germas.local', []);
+  const [userName, setUserName] = useState<string>('Administrator');
+  const [userEmail, setUserEmail] = useState<string>('admin@germas.local');
+  const [userPhoto, setUserPhoto] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      setUserName(sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name') ?? 'Administrator');
+      setUserEmail(sessionStorage.getItem('user_email') ?? localStorage.getItem('user_email') ?? 'admin@germas.local');
+      setUserPhoto(sessionStorage.getItem('user_photo_url') ?? localStorage.getItem('user_photo_url'));
+    };
+
+    syncFromStorage();
+    window.addEventListener('auth-change', syncFromStorage);
+
+    const token = sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
+    if (token) {
+      type MeResponse = {
+        status: string;
+        user: {
+          name: string;
+          email: string;
+          photo_url?: string | null;
+        };
+      };
+
+      apiClient
+        .get<MeResponse>('/auth/me')
+        .then((response) => {
+          const name = response.user?.name ?? null;
+          const email = response.user?.email ?? null;
+          const photo = response.user?.photo_url ?? null;
+
+          if (name) {
+            sessionStorage.setItem('user_name', name);
+            localStorage.setItem('user_name', name);
+          }
+          if (email) {
+            sessionStorage.setItem('user_email', email);
+            localStorage.setItem('user_email', email);
+          }
+          if (photo) {
+            sessionStorage.setItem('user_photo_url', photo);
+            localStorage.setItem('user_photo_url', photo);
+          } else {
+            sessionStorage.removeItem('user_photo_url');
+            localStorage.removeItem('user_photo_url');
+          }
+
+          syncFromStorage();
+        })
+        .catch(() => {
+          /* ignore - fallback to cached storage */
+        });
+    }
+
+    return () => {
+      window.removeEventListener('auth-change', syncFromStorage);
+    };
+  }, []);
+
+  const avatarSrc = useMemo(() => {
+    if (userPhoto) return userPhoto;
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=0ea5e9&color=fff`;
+  }, [userPhoto, userName]);
 
   const menuItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -203,7 +266,7 @@ const AdminLayout: React.FC = () => {
                 <span className="text-xs text-slate-500">Admin Panel</span>
              </div>
              <div className="w-9 h-9 rounded-full bg-green-100 border border-green-200 flex items-center justify-center text-green-700 font-bold overflow-hidden">
-                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=0ea5e9&color=fff`} alt={userName} />
+                <img src={avatarSrc} alt={userName} />
              </div>
           </div>
         </header>

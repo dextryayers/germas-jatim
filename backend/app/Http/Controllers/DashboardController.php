@@ -22,13 +22,17 @@ class DashboardController extends Controller
             ->groupBy('status')
             ->pluck('total', 'status');
 
-        $reportsTotal = (int) ($reportStatusTotals['pending'] ?? 0)
+        // Hitung total laporan (laporan kegiatan + evaluasi) agar kartu "Laporan Masuk"
+        // dan "Perlu Verifikasi" mencerminkan seluruh pengajuan yang masuk.
+        $laporanTotal = (int) ($reportStatusTotals['pending'] ?? 0)
             + (int) ($reportStatusTotals['verified'] ?? 0)
             + (int) ($reportStatusTotals['rejected'] ?? 0);
 
         $evaluationsTotal = (int) ($evaluationStatusTotals['pending'] ?? 0)
             + (int) ($evaluationStatusTotals['verified'] ?? 0)
             + (int) ($evaluationStatusTotals['rejected'] ?? 0);
+
+        $reportsTotal = $laporanTotal + $evaluationsTotal;
 
         $averageScore = EvaluationSubmission::whereNotNull('score')->avg('score');
         $averageScore = $averageScore !== null ? round((float) $averageScore, 1) : null;
@@ -45,7 +49,7 @@ class DashboardController extends Controller
             [
                 'id' => 'reports_pending',
                 'label' => 'Perlu Verifikasi',
-                'value' => (int) ($reportStatusTotals['pending'] ?? 0),
+                'value' => (int) ($reportStatusTotals['pending'] ?? 0) + (int) ($evaluationStatusTotals['pending'] ?? 0),
                 'description' => 'Laporan menunggu aksi',
             ],
             [
@@ -74,9 +78,9 @@ class DashboardController extends Controller
                 'summary' => [
                     'reports' => [
                         'total' => $reportsTotal,
-                        'pending' => (int) ($reportStatusTotals['pending'] ?? 0),
-                        'verified' => (int) ($reportStatusTotals['verified'] ?? 0),
-                        'rejected' => (int) ($reportStatusTotals['rejected'] ?? 0),
+                        'pending' => (int) ($reportStatusTotals['pending'] ?? 0) + (int) ($evaluationStatusTotals['pending'] ?? 0),
+                        'verified' => (int) ($reportStatusTotals['verified'] ?? 0) + (int) ($evaluationStatusTotals['verified'] ?? 0),
+                        'rejected' => (int) ($reportStatusTotals['rejected'] ?? 0) + (int) ($evaluationStatusTotals['rejected'] ?? 0),
                     ],
                     'evaluations' => [
                         'total' => $evaluationsTotal,
@@ -100,16 +104,18 @@ class DashboardController extends Controller
     private function resolveRecentSubmissions()
     {
         $laporan = LaporanSubmission::query()
-            ->with(['instansi', 'verifiedBy'])
+            ->with(['instansi', 'instansiLevel', 'verifiedBy'])
             ->orderByDesc('submitted_at')
             ->limit(25)
             ->get()
             ->map(function (LaporanSubmission $submission) {
                 return [
+                    'submission_db_id' => $submission->id,
                     'id' => $submission->submission_code,
                     'type' => 'laporan',
                     'title' => $submission->instansi_name ? 'Laporan ' . $submission->instansi_name : 'Laporan #' . $submission->submission_code,
                     'instansi' => $submission->instansi_name ?? optional($submission->instansi)->name ?? 'Instansi tidak dikenal',
+                    'instansi_level' => $submission->instansi_level_text ?? optional($submission->instansiLevel)->name,
                     'status' => $submission->status,
                     'score' => null,
                     'reviewer' => optional($submission->verifiedBy)->name,
@@ -118,16 +124,18 @@ class DashboardController extends Controller
             });
 
         $evaluations = EvaluationSubmission::query()
-            ->with(['instansi', 'verifiedBy'])
+            ->with(['instansi', 'instansiLevel', 'verifiedBy'])
             ->orderByDesc('submission_date')
             ->limit(25)
             ->get()
             ->map(function (EvaluationSubmission $submission) {
                 return [
+                    'submission_db_id' => $submission->id,
                     'id' => $submission->submission_code,
                     'type' => 'evaluasi',
                     'title' => 'Evaluasi ' . ($submission->instansi_name ?? $submission->submission_code),
                     'instansi' => $submission->instansi_name ?? optional($submission->instansi)->name ?? 'Instansi tidak dikenal',
+                    'instansi_level' => $submission->instansi_level_text ?? optional($submission->instansiLevel)->name,
                     'status' => $submission->status,
                     'score' => $submission->score,
                     'reviewer' => optional($submission->verifiedBy)->name,

@@ -7,7 +7,6 @@ import RequireAuth from './components/RequireAuth';
 // Lazy load pages for performance
 const Home = lazy(() => import('./pages/Home'));
 const Forms = lazy(() => import('./pages/Forms'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Login = lazy(() => import('./pages/Login'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const NotFound = lazy(() => import('./pages/NotFound'));
@@ -33,7 +32,6 @@ const App: React.FC = () => {
           <Route path="/" element={<Layout />}>
             <Route index element={<Home />} />
             <Route path="formulir" element={<Forms />} />
-            <Route path="dashboard" element={<Dashboard />} />
           </Route>
           
           <Route path="/login" element={<Login />} />

@@ -21,7 +21,16 @@ class EvaluationSubmissionController extends Controller
         $perPage = min(max($request->integer('per_page', 15), 1), 100);
 
         $submissions = EvaluationSubmission::query()
-            ->with(['instansi', 'instansiLevel', 'category', 'submittedBy'])
+            ->with([
+                'instansi',
+                'instansiLevel',
+                'category',
+                'submittedBy',
+                'answers.question.cluster',
+                'originRegency',
+                'originDistrict',
+                'originVillage',
+            ])
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->input('status')))
             ->when($request->filled('instansi_id'), fn ($query) => $query->where('instansi_id', $request->integer('instansi_id')))
             ->when($request->filled('instansi_level_id'), fn ($query) => $query->where('instansi_level_id', $request->integer('instansi_level_id')))
@@ -47,26 +56,10 @@ class EvaluationSubmissionController extends Controller
         $answersInput = collect($data['answers'] ?? []);
         unset($data['answers']);
 
-        $questionIds = $answersInput->pluck('question_id')->unique()->values();
-        $questions = EvaluasiQuestion::query()
-            ->with('cluster')
-            ->whereIn('id', $questionIds)
-            ->get()
-            ->keyBy('id');
-
-        if ($questions->count() !== $questionIds->count()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Beberapa pertanyaan evaluasi tidak ditemukan.',
-            ], 422);
-        }
-
-        $score = 0;
-        if ($questions->count() > 0) {
-            $totalQuestions = $questions->count();
-            $totalScore = $answersInput->sum('answer_value');
-            $score = (int) round(($totalScore / $totalQuestions) * 100);
-        }
+        // Hitung skor langsung dari jawaban yang dikirim frontend
+        $totalQuestions = max($answersInput->count(), 1);
+        $totalScore = $answersInput->sum('answer_value');
+        $score = (int) round(($totalScore / $totalQuestions) * 100);
 
         $category = EvaluationCategory::query()
             ->where('min_score', '<=', $score)
@@ -75,13 +68,16 @@ class EvaluationSubmissionController extends Controller
 
         $userId = optional($request->user())->id;
 
-        $submission = DB::transaction(function () use ($data, $answersInput, $questions, $category, $score, $userId) {
+        $submission = DB::transaction(function () use ($data, $answersInput, $category, $score, $userId) {
             $submission = EvaluationSubmission::create([
                 'submission_code' => $this->generateSubmissionCode('EVL'),
                 'instansi_id' => $data['instansi_id'] ?? null,
                 'instansi_name' => $data['instansi_name'],
                 'instansi_level_id' => $data['instansi_level_id'] ?? null,
                 'instansi_level_text' => $data['instansi_level_text'] ?? null,
+                'origin_regency_id' => $data['origin_regency_id'] ?? null,
+                'origin_district_id' => $data['origin_district_id'] ?? null,
+                'origin_village_id' => $data['origin_village_id'] ?? null,
                 'instansi_address' => $data['instansi_address'] ?? null,
                 'pejabat_nama' => $data['pejabat_nama'] ?? null,
                 'pejabat_jabatan' => $data['pejabat_jabatan'] ?? null,
@@ -97,12 +93,10 @@ class EvaluationSubmissionController extends Controller
                 'submitted_by' => $userId,
             ]);
 
-            $answersPayload = $answersInput->map(function ($answer) use ($questions) {
-                $question = $questions->get($answer['question_id']);
-
+            $answersPayload = $answersInput->map(function ($answer) {
                 return [
-                    'question_id' => $question->id,
-                    'question_text' => $question->question_text,
+                    'question_id' => (int) $answer['question_id'],
+                    'question_text' => $answer['question_text'],
                     'answer_value' => (int) $answer['answer_value'],
                     'remark' => $answer['remark'] ?? null,
                 ];
@@ -129,6 +123,9 @@ class EvaluationSubmissionController extends Controller
             'category',
             'answers',
             'statusLogs.changedBy',
+            'originRegency',
+            'originDistrict',
+            'originVillage',
         ]))
             ->additional([
                 'status' => 'success',
@@ -151,7 +148,11 @@ class EvaluationSubmissionController extends Controller
             'verifiedBy',
         ]);
 
-        return EvaluationSubmissionResource::make($submission)
+        return EvaluationSubmissionResource::make($submission->load([
+            'originRegency',
+            'originDistrict',
+            'originVillage',
+        ]))
             ->additional(['status' => 'success'])
             ->response();
     }
@@ -197,6 +198,9 @@ class EvaluationSubmissionController extends Controller
             'statusLogs.changedBy',
             'submittedBy',
             'verifiedBy',
+            'originRegency',
+            'originDistrict',
+            'originVillage',
         ]))
             ->additional([
                 'status' => 'success',

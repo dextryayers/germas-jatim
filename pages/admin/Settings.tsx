@@ -1,20 +1,38 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Save, Bell, Shield, Database, ToggleLeft, ToggleRight, Calendar, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Settings: React.FC = () => {
+  const [reportingYear, setReportingYear] = useState<number>(new Date().getFullYear());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedYear = window.localStorage.getItem('reporting_year');
+    if (!storedYear) return;
+    const parsed = parseInt(storedYear, 10);
+    if (!Number.isNaN(parsed)) {
+      setReportingYear(parsed);
+    }
+  }, []);
+
   const handleSave = () => {
-     toast.promise(
-        new Promise((resolve) => setTimeout(resolve, 1000)),
-        {
-           loading: 'Menyimpan konfigurasi...',
-           success: 'Pengaturan berhasil disimpan!',
-           error: 'Gagal menyimpan.',
+    toast.promise(
+      new Promise<void>((resolve) => {
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('reporting_year', String(reportingYear));
         }
-     );
-  }
+        setTimeout(() => resolve(), 1000);
+      }),
+      {
+        loading: 'Menyimpan konfigurasi...',
+        success: 'Pengaturan berhasil disimpan!',
+        error: 'Gagal menyimpan.',
+      }
+    );
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -26,39 +44,59 @@ const Settings: React.FC = () => {
       <div className="grid gap-8">
         {/* Periode Pelaporan */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-           <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-white border-b border-blue-100 flex items-center gap-3">
-              <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><Calendar className="w-5 h-5"/></div>
-              <h3 className="font-bold text-slate-800">Periode & Jadwal Pelaporan</h3>
-           </div>
-           
-           <div className="p-6 grid md:grid-cols-2 gap-8">
-              <div className="space-y-2">
-                 <label className="text-sm font-medium text-slate-700">Batas Pelaporan Semester 1</label>
-                 <input 
-                    type="date" 
-                    className="w-full border-slate-300 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm py-2.5 px-3" 
-                    defaultValue="2024-07-31" 
-                 />
-              </div>
-              <div className="space-y-2">
-                 <label className="text-sm font-medium text-slate-700">Batas Pelaporan Semester 2</label>
-                 <input 
-                    type="date" 
-                    className="w-full border-slate-300 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm py-2.5 px-3" 
-                    defaultValue="2025-01-31" 
-                 />
-              </div>
-              
-              <div className="md:col-span-2 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                 <label className="flex items-start gap-3 cursor-pointer">
-                    <input type="checkbox" className="mt-1 w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500" defaultChecked />
-                    <div>
-                       <span className="text-sm font-semibold text-slate-800 block">Izinkan pelaporan terlambat</span>
-                       <span className="text-xs text-slate-500">Instansi masih dapat mengirim laporan setelah tenggat waktu dengan status "Terlambat".</span>
-                    </div>
-                 </label>
-              </div>
-           </div>
+          <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-white border-b border-blue-100 flex items-center gap-3">
+            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><Calendar className="w-5 h-5"/></div>
+            <h3 className="font-bold text-slate-800">Periode & Jadwal Pelaporan</h3>
+          </div>
+          
+          <div className="p-6 grid md:grid-cols-2 gap-8">
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium text-slate-700">Tahun Periode Pelaporan</label>
+              <input
+                type="number"
+                min="2000"
+                max="2100"
+                value={reportingYear}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(value)) {
+                    setReportingYear(value);
+                  } else if (e.target.value === '') {
+                    setReportingYear(new Date().getFullYear());
+                  }
+                }}
+                className="w-40 border-slate-300 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm py-2.5 px-3"
+              />
+              <p className="text-xs text-slate-500">Tahun ini akan digunakan sebagai periode pelaporan pada form evaluasi dan laporan.</p>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Batas Pelaporan Semester 1</label>
+              <input 
+                type="date" 
+                className="w-full border-slate-300 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm py-2.5 px-3" 
+                defaultValue="2024-07-31" 
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Batas Pelaporan Semester 2</label>
+              <input 
+                type="date" 
+                className="w-full border-slate-300 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm py-2.5 px-3" 
+                defaultValue="2025-01-31" 
+              />
+            </div>
+            
+            <div className="md:col-span-2 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" className="mt-1 w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500" defaultChecked />
+                <div>
+                  <span className="text-sm font-semibold text-slate-800 block">Izinkan pelaporan terlambat</span>
+                  <span className="text-xs text-slate-500">Instansi masih dapat mengirim laporan setelah tenggat waktu dengan status "Terlambat".</span>
+                </div>
+              </label>
+            </div>
+          </div>
         </div>
 
         {/* Notifikasi */}

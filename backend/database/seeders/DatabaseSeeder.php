@@ -9,6 +9,7 @@ use App\Models\EvaluationCategory;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Database\Seeders\InstansiSeeder; // Add this line
 
 class DatabaseSeeder extends Seeder
 {
@@ -33,6 +34,9 @@ class DatabaseSeeder extends Seeder
 
             return [$item['code'] => $level->id];
         });
+
+        // Seed daftar instansi tingkat provinsi
+        $this->call(InstansiSeeder::class);
 
         $instansiList = [
             ['name' => 'Dinas Kesehatan Provinsi Jawa Timur', 'category' => 'dinas', 'level_code' => 'provinsi'],

@@ -3,12 +3,8 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlignLeft, BarChart3, Building2, ChevronRight, MapPin, Search } from 'lucide-react';
-import { CategoryScale, Chart as ChartJS, Legend, LinearScale, Tooltip } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+import { AlignLeft, Building2, ChevronRight, MapPin, Search } from 'lucide-react';
 import { apiClient } from '../../utils/apiClient';
-
-ChartJS.register(CategoryScale, LinearScale, Tooltip, Legend);
 
 type ProvinceSummary = {
   id: number;
@@ -179,17 +175,11 @@ const Regions: React.FC = () => {
     const regencyCount = filteredRegencies.length;
     const districtCount = filteredRegencies.reduce((acc, regency) => acc + regency.district_count, 0);
     const villageCount = filteredRegencies.reduce((acc, regency) => acc + regency.village_count, 0);
-    const districtHistogram = filteredRegencies.map((regency) => ({
-      name: regency.name,
-      districts: regency.district_count,
-      villages: regency.village_count,
-    }));
 
     return {
       regencyCount,
       districtCount,
       villageCount,
-      districtHistogram,
     };
   }, [filteredRegencies]);
 
@@ -200,96 +190,6 @@ const Regions: React.FC = () => {
       villages: summary?.villages ?? aggregateStats.villageCount,
     }),
     [summary, aggregateStats],
-  );
-
-  const chartData = useMemo(() => {
-    const labels = aggregateStats.districtHistogram.map((item) => item.name);
-    const districtSeries = aggregateStats.districtHistogram.map((item) => item.districts);
-    const villageSeries = aggregateStats.districtHistogram.map((item) => item.villages);
-
-    return {
-      labels,
-      datasets: [
-        {
-          label: 'Kecamatan',
-          data: districtSeries,
-          backgroundColor: 'rgba(16, 185, 129, 0.7)',
-          borderRadius: 12,
-          maxBarThickness: 32,
-        },
-        {
-          label: 'Desa/Kelurahan',
-          data: villageSeries,
-          backgroundColor: 'rgba(59, 130, 246, 0.65)',
-          borderRadius: 12,
-          maxBarThickness: 32,
-        },
-      ],
-    };
-  }, [aggregateStats]);
-
-  const chartEmpty = useMemo(
-    () => chartData.labels.length === 0 || chartData.datasets.every((dataset) => dataset.data.every((value) => value === 0)),
-    [chartData],
-  );
-
-  const chartOptions = useMemo(
-    () => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: 'bottom' as const,
-          labels: {
-            usePointStyle: true,
-            pointStyle: 'rounded',
-            boxWidth: 12,
-            font: {
-              family: 'Plus Jakarta Sans, sans-serif',
-              size: 11,
-            },
-          },
-        },
-        tooltip: {
-          backgroundColor: '#0f172a',
-          padding: 12,
-          titleColor: '#f8fafc',
-          bodyColor: '#e2e8f0',
-          borderWidth: 0,
-          borderRadius: 12,
-        },
-      },
-      scales: {
-        x: {
-          grid: {
-            display: false,
-          },
-          ticks: {
-            maxRotation: 45,
-            minRotation: 0,
-            autoSkip: true,
-            font: {
-              family: 'Plus Jakarta Sans, sans-serif',
-              size: 10,
-            },
-          },
-        },
-        y: {
-          beginAtZero: true,
-          ticks: {
-            stepSize: 1,
-            font: {
-              family: 'Plus Jakarta Sans, sans-serif',
-              size: 10,
-            },
-          },
-          grid: {
-            color: 'rgba(148, 163, 184, 0.15)',
-          },
-        },
-      },
-    }),
-    [],
   );
 
   const formatNumber = useCallback((value: number | null | undefined) => {
@@ -425,27 +325,6 @@ const Regions: React.FC = () => {
       </div>
 
       <Card className="overflow-hidden border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center gap-4 border-b border-slate-100 bg-slate-50/80 px-6 py-4">
-          <div className="rounded-xl bg-primary-500/15 p-3 text-primary-600">
-            <BarChart3 className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-slate-800">Sebaran Kecamatan & Desa</h2>
-            <p className="text-xs text-slate-500">Perbandingan jumlah kecamatan dan desa per kab/kota.</p>
-          </div>
-        </div>
-        <div className="h-80 px-4 pb-4">
-          {chartEmpty ? (
-            <div className="flex h-full items-center justify-center text-sm text-slate-500">
-              Data belum tersedia untuk filter ini.
-            </div>
-          ) : (
-            <Bar options={chartOptions} data={chartData} />
-          )}
-        </div>
-      </Card>
-
-      <Card className="overflow-hidden border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-6 py-4">
           <div>
             <h3 className="text-base font-bold text-slate-800">Struktur Wilayah</h3>
@@ -502,7 +381,13 @@ const Regions: React.FC = () => {
                         <span className="flex items-center gap-2 text-sm font-bold text-slate-800">
                           {regency.name}
                           <Badge variant="info" size="sm">
-                            {regency.type === 'kota' ? 'Kota' : 'Kabupaten'}
+                            {(() => {
+                              const lowerName = regency.name.toLowerCase();
+                              if (lowerName.startsWith('kota ')) return 'Kota';
+                              if (lowerName.startsWith('kabupaten ')) return 'Kabupaten';
+
+                              return regency.type === 'kota' ? 'Kota' : 'Kabupaten';
+                            })()}
                           </Badge>
                         </span>
                         <span className="text-xs text-slate-500">

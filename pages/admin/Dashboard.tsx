@@ -36,6 +36,7 @@ import {
   Tooltip as ChartTooltip,
   type ChartOptions,
   type ChartData,
+  type TooltipItem,
 } from 'chart.js';
 import { motion } from 'framer-motion';
 import { apiClient } from '../../utils/apiClient';
@@ -53,8 +54,10 @@ type DashboardCard = {
 type DashboardHistoryItem = {
   id: string;
   type: 'laporan' | 'evaluasi' | string;
+  submission_db_id?: number;
   title: string;
   instansi: string | null;
+  instansi_level?: string | null;
   status: 'pending' | 'verified' | 'rejected' | string;
   score: number | null;
   reviewer?: string | null;
@@ -311,7 +314,7 @@ const AdminDashboard: React.FC = () => {
             boxWidth: 8,
             font: {
               size: 11,
-              weight: '600',
+              weight: 600,
             },
           },
         },
@@ -323,8 +326,8 @@ const AdminDashboard: React.FC = () => {
           bodyColor: '#0f172a',
           padding: 12,
           callbacks: {
-            label: (context) => `${context.dataset.label}: ${formatNumber(context.parsed.y)}`,
-            footer: (items) => {
+            label: (context: TooltipItem<'bar'>) => `${context.dataset.label}: ${formatNumber(context.parsed.y)}`,
+            footer: (items: TooltipItem<'bar'>[]) => {
               const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
               return `Total: ${formatNumber(total)}`;
             },
@@ -364,7 +367,7 @@ const AdminDashboard: React.FC = () => {
             font: {
               size: 11,
             },
-            callback: (value) => formatNumber(Number(value)),
+            callback: (value: string | number) => formatNumber(Number(value)),
           },
         },
       },
@@ -557,11 +560,11 @@ const AdminDashboard: React.FC = () => {
           borderWidth: 1,
           titleColor: '#0f172a',
           bodyColor: '#0f172a',
-          titleFont: { size: 12, weight: '600' },
-          bodyFont: { size: 12, weight: '500' },
+          titleFont: { size: 12, weight: 600 },
+          bodyFont: { size: 12, weight: 500 },
           padding: 12,
           callbacks: {
-            label: (context) => `${formatNumber(context.parsed.y)} kunjungan`,
+            label: (context: TooltipItem<'line'>) => `${formatNumber(Number(context.parsed.y))} kunjungan`,
           },
         },
       },
@@ -600,7 +603,7 @@ const AdminDashboard: React.FC = () => {
             font: {
               size: 11,
             },
-            callback: (value) => formatNumber(Number(value)),
+            callback: (value: string | number) => formatNumber(Number(value)),
           },
         },
       },
@@ -762,17 +765,35 @@ const AdminDashboard: React.FC = () => {
         return;
       }
 
-      setHistoryItems((prev) => prev.filter((history) => history.id !== item.id));
+      try {
+        if (item.submission_db_id && (item.type === 'laporan' || item.type === 'evaluasi')) {
+          const basePath = item.type === 'laporan' ? '/laporan/submissions' : '/evaluasi/submissions';
+          await apiClient.delete(`${basePath}/${item.submission_db_id}`);
+        }
 
-      void Swal.fire({
-        icon: 'success',
-        title: 'Aktivitas dihapus',
-        text: 'Histori dan diagram telah diperbarui.',
-        timer: 1800,
-        showConfirmButton: false,
-      });
+        setHistoryItems((prev) => prev.filter((history) => history.id !== item.id));
+
+        void fetchMetrics({ silent: true });
+
+        void Swal.fire({
+          icon: 'success',
+          title: 'Aktivitas dihapus',
+          text: item.submission_db_id
+            ? 'Data laporan di server dan histori dashboard telah diperbarui.'
+            : 'Histori dan diagram telah diperbarui.',
+          timer: 1800,
+          showConfirmButton: false,
+        });
+      } catch (error) {
+        console.error('[Dashboard] Gagal menghapus aktivitas/backend submission:', error);
+        void Swal.fire({
+          icon: 'error',
+          title: 'Gagal menghapus',
+          text: 'Terjadi kesalahan saat menghapus data di server. Coba lagi.',
+        });
+      }
     },
-    [],
+    [fetchMetrics],
   );
 
   const handleAddHistory = useCallback(async () => {
@@ -850,6 +871,7 @@ const AdminDashboard: React.FC = () => {
       type: formValues.type,
       title: formValues.title,
       instansi: formValues.instansi || 'Instansi tidak dikenal',
+      instansi_level: null,
       status: formValues.status as DashboardHistoryItem['status'],
       score: formValues.score ? Number(formValues.score) : null,
       reviewer: null,
