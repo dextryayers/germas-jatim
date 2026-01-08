@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
-import { Lock, Mail } from 'lucide-react';
+import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { closeAlert, showError, showLoading, showSuccess } from '../utils/alerts';
 import LogoGermas from '../components/svg/logo-germas.svg';
@@ -12,6 +12,7 @@ const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     apiClient.prefetchCsrf().catch(() => {
@@ -93,7 +94,11 @@ const Login: React.FC = () => {
 
       if (error?.status === 403) {
         const rawPayload = error?.data && typeof error.data === 'object' ? error.data : undefined;
-        const rawContext = rawPayload && typeof rawPayload === 'object' ? (rawPayload as any).context : undefined;
+
+        let rawContext: any = undefined;
+        if (rawPayload && typeof rawPayload === 'object') {
+          rawContext = (rawPayload as any).context;
+        }
 
         const normalizedContext = rawContext && typeof rawContext === 'object'
           ? {
@@ -147,15 +152,15 @@ const Login: React.FC = () => {
         <div className="p-8">
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Email atau Username</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-slate-400 group-focus-within:text-emerald-600 transition-colors" />
+                  <User className="h-5 w-5 text-slate-400 group-focus-within:text-emerald-600 transition-colors" />
                 </div>
                 <input
-                  type="email"
+                  type="text"
                   className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:placeholder-slate-500 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 sm:text-sm transition-all"
-                  placeholder="nama@instansi.go.id"
+                  placeholder="Email instansi atau username admin"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   required
@@ -170,30 +175,26 @@ const Login: React.FC = () => {
                   <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-emerald-600 transition-colors" />
                 </div>
                 <input
-                  type="password"
-                  className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:placeholder-slate-500 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 sm:text-sm transition-all"
+                  type={showPassword ? 'text' : 'password'}
+                  className="block w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:placeholder-slate-500 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 sm:text-sm transition-all"
                   placeholder="Masukkan kata sandi"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   minLength={8}
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none"
+                  aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
             </div>
 
             <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <input
-                  id="remember_me"
-                  name="remember_me"
-                  type="checkbox"
-                  className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 rounded cursor-pointer"
-                />
-                <label htmlFor="remember_me" className="ml-2 block text-sm text-slate-600 cursor-pointer select-none">
-                  Ingat saya
-                </label>
-              </div>
-
               <div className="text-sm">
                 <Link to="/forgot-password" className="font-semibold text-emerald-600 hover:text-emerald-500 hover:underline transition-all">
                   Lupa password?

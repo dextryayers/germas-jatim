@@ -20,7 +20,7 @@ class RegionController extends Controller
 
         $province = Province::query()
             ->where('code', $provinceCode)
-            ->withCount(['regencies', 'districts', 'villages'])
+            ->withCount(['regencies'])
             ->firstOrFail();
 
         $regenciesQuery = $province->regencies()->withCount(['districts', 'villages'])->orderBy('name');
@@ -38,6 +38,9 @@ class RegionController extends Controller
         $regencyCount = $regencies->count();
         $districtCount = $regencies->sum('districts_count');
         $villageCount = $regencies->sum('villages_count');
+
+        $province->setAttribute('districts_count', $districtCount);
+        $province->setAttribute('villages_count', $villageCount);
 
         return response()->json([
             'province' => new ProvinceResource($province),

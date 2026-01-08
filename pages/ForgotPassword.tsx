@@ -6,6 +6,7 @@ import { Mail, ArrowLeft, CheckCircle, ShieldCheck, KeyRound, Timer, ArrowRight,
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import LogoGermas from '../components/svg/logo-germas.svg';
+import { apiClient } from '../utils/apiClient';
 
 type Step = 'EMAIL' | 'OTP' | 'NEW_PASSWORD' | 'SUCCESS';
 
@@ -35,7 +36,7 @@ const ForgotPassword: React.FC = () => {
   }, [timer]);
 
   // Step 1: Send OTP
-  const handleSendOtp = (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
        toast.error('Mohon masukkan email anda');
@@ -43,24 +44,21 @@ const ForgotPassword: React.FC = () => {
     }
     setIsLoading(true);
 
-    // Simulate API Call
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await apiClient.post('/auth/forgot-password', { email });
       setStep('OTP');
       setTimer(60); // 60 seconds cooldown
-      // In real app, this comes from email. For demo, we show it.
-      toast.success(
-         <div className="flex flex-col">
-            <span className="font-bold">Kode OTP Terkirim!</span>
-            <span className="text-xs">Gunakan kode: <span className="font-mono bg-yellow-100 px-1 rounded">123456</span> (Simulasi)</span>
-         </div>,
-         { duration: 5000 }
-      );
-    }, 1500);
+      toast.success('Kode OTP telah dikirim ke email anda.');
+    } catch (error: any) {
+      const message = error?.response?.data?.message ?? 'Gagal mengirim kode OTP.';
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Step 2: Verify OTP
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (otp.length !== 6) {
       toast.error('Kode OTP harus 6 digit');
@@ -68,25 +66,34 @@ const ForgotPassword: React.FC = () => {
     }
     setIsLoading(true);
 
-    // Simulate Verification
-    setTimeout(() => {
+    try {
+      await apiClient.post('/auth/forgot-password/verify', { email, otp });
+      setStep('NEW_PASSWORD');
+      toast.success('OTP valid! Silakan buat password baru.');
+    } catch (error: any) {
+      const message = error?.response?.data?.message ?? 'Kode OTP salah atau sudah kadaluarsa.';
+      toast.error(message);
+      setOtp('');
+    } finally {
       setIsLoading(false);
-      if (otp === '123456') {
-        setStep('NEW_PASSWORD');
-        toast.success('OTP Valid! Silakan buat password baru.');
-      } else {
-        toast.error('Kode OTP salah. Coba lagi.');
-        setOtp('');
-      }
-    }, 1500);
+    }
   };
 
   // Step 3: Reset Password
-  const handleResetPassword = (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 6) {
-       toast.error('Password minimal 6 karakter');
+    if (newPassword.length < 8) {
+       toast.error('Password minimal 8 karakter');
        return;
+    }
+
+    const hasLowercase = /[a-z]/.test(newPassword);
+    const hasUppercase = /[A-Z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+
+    if (!hasLowercase || !hasUppercase || !hasNumber) {
+      toast.error('Password harus mengandung huruf besar, huruf kecil, dan angka.');
+      return;
     }
     if (newPassword !== confirmPassword) {
       toast.error('Konfirmasi password tidak cocok');
@@ -94,17 +101,36 @@ const ForgotPassword: React.FC = () => {
     }
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await apiClient.post('/auth/forgot-password/reset', {
+        email,
+        otp,
+        password: newPassword,
+        password_confirmation: confirmPassword,
+      });
       setStep('SUCCESS');
       toast.success('Password berhasil diperbarui!');
-    }, 1500);
+    } catch (error: any) {
+      const message = error?.response?.data?.message ?? 'Gagal memperbarui password. Coba lagi.';
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleResendCode = () => {
+  const handleResendCode = async () => {
      if (timer > 0) return;
-     setTimer(60);
-     toast.success('Kode OTP baru telah dikirim ke email anda.');
+     setIsLoading(true);
+     try {
+       await apiClient.post('/auth/forgot-password', { email });
+       setTimer(60);
+       toast.success('Kode OTP baru telah dikirim ke email anda.');
+     } catch (error: any) {
+       const message = error?.response?.data?.message ?? 'Gagal mengirim ulang kode OTP.';
+       toast.error(message);
+     } finally {
+       setIsLoading(false);
+     }
   };
 
   return (
@@ -117,7 +143,7 @@ const ForgotPassword: React.FC = () => {
         className="bg-white rounded-3xl shadow-[0_32px_90px_-60px_rgba(16,185,129,0.55)] w-full max-w-md overflow-hidden relative border border-emerald-50"
       >
         {/* Dynamic Header Background based on Step */}
-        <div className={`h-32 relative overflow-hidden transition-colors duration-500 ${
+        <div className={`h-40 relative overflow-hidden transition-colors duration-500 ${
            step === 'SUCCESS'
              ? 'bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500'
              : 'bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-700'
@@ -125,18 +151,10 @@ const ForgotPassword: React.FC = () => {
            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
            <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/10 rounded-full translate-y-1/2 -translate-x-1/4 blur-2xl"></div>
            
-           <div className="absolute inset-0 flex items-center justify-center">
-              <motion.div 
-                 key={step}
-                 initial={{ scale: 0.5, opacity: 0 }}
-                 animate={{ scale: 1, opacity: 1 }}
-                 className="w-16 h-16 bg-emerald-100/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-emerald-600 shadow-inner border border-emerald-100/30"
-              >
-                 {step === 'EMAIL' && <Mail className="w-8 h-8" />}
-                 {step === 'OTP' && <ShieldCheck className="w-8 h-8" />}
-                 {step === 'NEW_PASSWORD' && <KeyRound className="w-8 h-8" />}
-                 {step === 'SUCCESS' && <CheckCircle className="w-8 h-8" />}
-              </motion.div>
+           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <div className="w-20 h-20 bg-white/95 backdrop-blur-sm rounded-2xl flex items-center justify-center shadow-lg border border-emerald-100 p-2">
+                <img src={LogoGermas} alt="Logo Germas" className="w-full h-full object-contain" />
+              </div>
            </div>
         </div>
         
@@ -272,7 +290,7 @@ const ForgotPassword: React.FC = () => {
                               value={newPassword}
                               onChange={(e) => setNewPassword(e.target.value)}
                               className="block w-full pl-10 pr-3 py-3 border-2 border-slate-200 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-green-500 focus:ring-0 sm:text-sm transition-all"
-                              placeholder="Minimal 6 karakter"
+                              placeholder="Minimal 8 karakter dengan huruf besar, huruf kecil, dan angka"
                               required
                            />
                         </div>
@@ -328,7 +346,7 @@ const ForgotPassword: React.FC = () => {
                    onClick={() => navigate('/login')}
                    className="w-full bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-600 hover:via-emerald-700 hover:to-teal-700 text-white py-3.5 rounded-xl shadow-lg shadow-emerald-500/30 mt-4"
                 >
-                   Masuk ke Dashboard
+                   Kembali ke Halaman Login
                 </Button>
               </motion.div>
             )}

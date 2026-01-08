@@ -1,0 +1,25 @@
+# Frontend / Node
+node_modules/
+dist/
+
+# Environment & secrets
+.env
+backend/.env
+backend/env
+
+# Laravel vendor & caches
+backend/vendor/
+backend/bootstrap/cache/
+
+# Laravel storage & logs
+backend/storage/
+backend/public/storage/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.log
+
+# Database dumps
+*.sql
+backend/database.sql

@@ -29,6 +29,7 @@ export interface LaporanSection {
 export interface LaporanTemplate {
   instansiId: string;
   instansiName: string;
+  level?: string;
   sections: LaporanSection[];
 }
 
@@ -123,43 +124,72 @@ export const INSTANSI_LEVELS = [
   'INSTANSI TINGKAT PERUSAHAAN'
 ];
 
-export const INSTANSI_LIST = [
+const INSTANSI_LIST_PROV_INTERNAL = [
   { id: 'bappeda', name: 'Badan Perencanaan Pembangunan Daerah' },
   { id: 'dinkes', name: 'Dinas Kesehatan' },
   { id: 'dispora', name: 'Dinas Kepemudaan dan Olahraga' },
   { id: 'diknas', name: 'Dinas Pendidikan' },
-  { id: 'dinsos', name: 'Dinas Sosial' },
-  // { id: 'dlh', name: 'Dinas Lingkungan Hidup' },
+  { id: 'dibun', name: 'Dinas Perkebunan' },
+  { id: 'disnak', name: 'Dinas Peternakan' },
+  { id: 'dpu-sda', name: 'Dinas Pekerjaan Umum Sumber Daya Air' },
+  { id: 'esdm', name: 'Dinas Energi dan Sumberdaya Mineral' },
+  { id: 'biro-kesra', name: 'Biro  Kesejahteraan Rakyat' },
+  { id: 'biro-organisasi', name: 'Biro Organisasi Sekda Provinsi' },
+  { id: 'dishut', name: 'Dinas Kehutanan' },
+  { id: 'distan-kp', name: 'Dinas Pertanian dan Ketahanan Pangan' },
+  { id: 'diskanlut', name: 'Dinas Perikanan dan Kelautan' },
+  { id: 'disperkim-cipta-karya', name: 'Dinas Perumahan Rakyat, Kawasan Perrukiman dan Cipta Karya' },
   { id: 'dishub', name: 'Dinas Perhubungan' },
-  { id: 'DLH', name: 'Dinas Lingkungan Hidup'},
-  { id: 'diskominfo', name: 'Dinas Komunikasi dan Informasi'},
-  { id: 'dinper', name: 'Dinas Perikanan'},
-  { id: 'dinaspar', name: 'Dinas Kebudyaan dan Pariwisata'},
-  { id: 'dibun', name: 'Dinas Perkebunan'},
-  { id: 'dikop', name: 'Dinas Koperasi dan Usaha Mikro Kecil'},
-  { id: 'diklat', name: 'Dinas Peternakan'},
-  { id: 'diklat', name: 'Dinas Pekerjaan Umum Sumber Daya Air'},
-  { id: 'diklat', name: 'Dinas Energi dan Sumber Daya Mineral'},
-  { id: 'biro', name: 'Biro Kesejahteraan Rakyat'},
-  { id: 'biro', name: 'Biro Organisasi Sekda Provinsi'},
-  { id: 'biro', name: 'Dinas Pemberdayaan Perempuan, Perlindungan Anak, dan Kependudukan'},
-  { id: 'biro', name: 'Balai Besar POM'},
-  { id: 'dinas', name: 'Dinas Pertanian dan Ketahanan Pangan'},
-  { id: 'dinas', name: 'Dinas Perumahan Rakyat, Kawasan Pemukiman dan Cipta  Karya'},
-  { id: 'dinas', name: 'Dinas Perindustrian dan Pedagangan'},
-  { id: 'dinas', name: 'Dinas Tenaga Kerja dan Transmigasi'},
-  { id: 'kpi', name: 'Komisi Penyiaran Indonesia'},
-  { id: 'dinas', name: 'Dinas Pemberdayaan Perempuan, Perlindungan Anak, dan Kependudukan'},
-  { id: 'dinas', name: 'BPJS Kesehatan'},
-  { id: 'dinas', name: 'BKKBN'},
-  { id: 'dinas', name: 'Lembaga Layanan Pendidikan Tinggi Wilayah FII'},
-  { id: 'dinas', name: 'Dinas PMD'},
-  { id: 'dinas', name: 'PT. PLN'},
-  { id: 'dinas', name: 'TNI'},
-  { id: 'dinas', name: 'Polri'},
-  { id: 'dinas', name: 'BNN'},
-  { id: 'dinas', name: 'Kanwil Agama'},
-  { id: 'dinas', name: 'FKM Unair'},  
+  { id: 'dlh', name: 'Dinas Lingkungan Hidup' },
+  { id: 'disperindag', name: 'Dinas Perindustrian dan Perdagangan' },
+  { id: 'disnakertrans', name: 'Dinas Tenaga Kerja dan Transmigrasi' },
+  { id: 'diskominfo', name: 'Dinas Komunikasi dan Informatika' },
+  { id: 'kpid-jatim', name: 'Komisi Penyiaran Indonesia Daerah (KPID) Jatim' },
+  { id: 'dp3akb', name: 'Dinas Pemberdayaan Perempuan, Perlindungan Anak, dan Kependudukan' },
+  { id: 'pom', name: 'Balai Besar POM di Surabaya' },
+  { id: 'bpjs', name: 'BPJS Kesehatan' },
+  { id: 'bkkbn', name: 'BKKBN' },
+  { id: 'lldikti7', name: 'Lembaga Layanan Pendidikan Tinggi Wilayah VII' },
+  { id: 'dpmddes', name: 'Dinas Pemberdayaan Masyarakat dan Desa' },
+  { id: 'bumn-pln', name: 'BUMN (PT PLN )' },
+  { id: 'tni', name: 'TNI' },
+  { id: 'polri', name: 'POLRI' },
+  { id: 'bnn', name: 'BNN' },
+  { id: 'kanwil-agama', name: 'Kanwil Agama' },
+  { id: 'fkm-unair', name: 'FKM UNAIR' },  
+];
+
+export const INSTANSI_LIST_PROV = INSTANSI_LIST_PROV_INTERNAL;
+
+// Backwards-compatible export used in various parts of the app (defaults to provinsi list)
+export const INSTANSI_LIST = INSTANSI_LIST_PROV_INTERNAL;
+
+// Khusus untuk Laporan Tingkat Kabupaten/Kota (dropdown kab/kota)
+export const INSTANSI_LIST_KABKOTA = [
+  { id: 'bappeda', name: 'Badan Perencanaan Pembangunan Daerah' },
+  { id: 'dinkes', name: 'Dinas Kesehatan' },
+  { id: 'dispora', name: 'Dinas Kepemudaan dan Olahraga' },
+  { id: 'dikbud', name: 'Dinas Pendidikan dan Kebudayaan' },
+  { id: 'kanwil-agama', name: 'Kanwil Agama' },
+  { id: 'dinas-pertanian-kp', name: 'Dinas Pertanian dan Ketahanan Pangan' },
+  { id: 'dinas-perikanan-kelautan', name: 'Dinas Perikanan dan Kelautan' },
+  { id: 'dinas-perumahan-prkp', name: 'Dinas Perumahan Rakyat, kawasan permukiman dan Cipta Karya' },
+  { id: 'dishub-kabkota', name: 'Dinas Perhubungan' },
+  { id: 'dlh-kabkota', name: 'Dinas  Lingkungan Hidup' },
+  { id: 'disperindag', name: 'Dinas Perindustrian dan Perdagangan' },
+  { id: 'disnakertrans', name: 'Dinas Tenaga Kerja dan Transmigrasi' },
+  { id: 'diskominfo-kabkota', name: 'Dinas Komunikasi dan Informatika' },
+  { id: 'dp3akb', name: 'Dinas Pemberdayaan Perempuan, Perlindungan Anak, dan Kependudukan' },
+  { id: 'bpjs-kesehatan', name: 'BPJS Kesehatan' },
+  { id: 'bupati-walikota', name: 'Bupati/Walikota' },
+  { id: 'bkkbn', name: 'Badan Kependudukan dan Keluarga Berencana Nasional (BKKBN)' },
+  { id: 'dinas-pariwisata', name: 'Dinas Kebudayaan dan Pariwisata' },
+  { id: 'dinas-sosial-kabkota', name: 'Dinas Sosial' },
+  { id: 'bumn', name: 'BUMN' },
+  { id: 'dinas-pmd', name: 'Dinas Pemberdayaan Masyarakat dan Desa' },
+  { id: 'tni-kabkota', name: 'TNI' },
+  { id: 'polri-kabkota', name: 'POLRI' },
+  { id: 'bnn-kabkota', name: 'BNN' },
 ];
 
 // --- STORE LOGIC ---
@@ -195,7 +225,7 @@ export const FormStore = {
   },
 
   // Laporan
-  getLaporanTemplate: (instansiId: string): LaporanTemplate => {
+  getLaporanTemplate: (instansiId: string, level?: string): LaporanTemplate => {
     const stored = localStorage.getItem(STORAGE_KEY_LAPORAN);
     let allTemplates: Record<string, LaporanTemplate> = {};
 
@@ -203,28 +233,41 @@ export const FormStore = {
       allTemplates = JSON.parse(stored);
     }
 
+    const compositeKey = level ? `${level}::${instansiId}` : null;
+
+    if (compositeKey && allTemplates[compositeKey]) {
+      return allTemplates[compositeKey];
+    }
+
     if (allTemplates[instansiId]) {
       return allTemplates[instansiId];
     }
 
     // Defaults
-    if (instansiId === 'bappeda') return DEFAULT_LAPORAN_BAPPEDA;
-    if (instansiId === 'dinkes') return DEFAULT_LAPORAN_DINKES;
+    if (instansiId === 'bappeda') return { ...DEFAULT_LAPORAN_BAPPEDA, level };
+    if (instansiId === 'dinkes') return { ...DEFAULT_LAPORAN_DINKES, level };
 
     // Generic Default if unknown
     const instansiName = INSTANSI_LIST.find(i => i.id === instansiId)?.name || 'Instansi';
     return {
       instansiId,
       instansiName,
+      level,
       sections: []
     };
   },
 
-  saveLaporanTemplate: (template: LaporanTemplate) => {
+  saveLaporanTemplate: (template: LaporanTemplate, level?: string) => {
     const stored = localStorage.getItem(STORAGE_KEY_LAPORAN);
     let allTemplates: Record<string, LaporanTemplate> = stored ? JSON.parse(stored) : {};
-    
-    allTemplates[template.instansiId] = template;
+
+    const resolvedLevel = level ?? template.level;
+    const key = resolvedLevel ? `${resolvedLevel}::${template.instansiId}` : template.instansiId;
+
+    allTemplates[key] = {
+      ...template,
+      level: resolvedLevel,
+    };
     localStorage.setItem(STORAGE_KEY_LAPORAN, JSON.stringify(allTemplates));
   },
   

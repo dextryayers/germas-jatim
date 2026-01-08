@@ -1,365 +1,407 @@
 <div align="center">
 
-# Germas Jawa Timur – Sistem Evaluasi & Pelaporan
+### SI-PORSI GERMAS
+**Sistem Pelaporan dan Evaluasi Gerakan Masyarakat Hidup Sehat (GERMAS) Pada Tatanan Tempat Kerja**  
+Dinas Kesehatan Provinsi Jawa Timur
 
-Platform terpadu untuk mengelola evaluasi, pelaporan, dan analitik program Gerakan Masyarakat Hidup Sehat (GERMAS) di Provinsi Jawa Timur.
+Platform terpadu untuk mengelola pelaporan, evaluasi, dan arsip program GERMAS di tatanan tempat kerja di Provinsi Jawa Timur.
 
-![Tech](https://img.shields.io/badge/Laravel-11.x-ff2d20?logo=laravel) ![React](https://img.shields.io/badge/React-19-61dafb?logo=react) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript) ![Vite](https://img.shields.io/badge/Vite-6.2-646cff?logo=vite)
+![Laravel](https://img.shields.io/badge/Laravel-11.x-ff2d20?logo=laravel)
+![React](https://img.shields.io/badge/React-18-61dafb?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript--3178c6?logo=typescript)
+![Vite](https://img.shields.io/badge/Vite-6.2-646cff?logo=vite)
 
 </div>
+
+---
+
+# SI-PORSI GERMAS
+
+## Ringkasan Proyek
+
+SI-PORSI GERMAS adalah aplikasi web untuk memfasilitasi **pelaporan** dan **evaluasi** pelaksanaan Gerakan Masyarakat Hidup Sehat (GERMAS) pada tatanan **tempat kerja** di Provinsi Jawa Timur.
+
+Aplikasi ini terdiri dari:
+
+- **Portal publik** untuk pengisian formulir evaluasi dan pelaporan GERMAS oleh instansi.
+- **Dashboard admin** untuk Dinas Kesehatan (provinsi / kab/kota) guna memverifikasi data, melihat arsip, dan mengelola pengaturan.
+- **Sistem otentikasi** dengan reset password via **OTP email**.
+- **Soft maintenance mode** yang memungkinkan admin menutup akses publik sementara tanpa mematikan server sepenuhnya.
+
+Dokumen ini menjelaskan **teknologi yang digunakan**, **kebutuhan sistem**, **langkah instalasi**, dan **panduan deploy ke hosting & domain lain**.
+
+---
 
 ## Daftar Isi
 
 1. [Ringkasan Proyek](#ringkasan-proyek)
-2. [Teknologi Utama](#teknologi-utama)
+2. [Arsitektur & Teknologi](#1-arsitektur--teknologi)
 3. [Struktur Direktori](#struktur-direktori)
-4. [Prasyarat](#prasyarat)
-5. [Konfigurasi Lingkungan](#konfigurasi-lingkungan)
-6. [Langkah Instalasi](#langkah-instalasi)
-7. [Konfigurasi Role & Data Awal](#konfigurasi-role--data-awal)
-8. [Perintah Harian](#perintah-harian)
-9. [Arsitektur Sistem](#arsitektur-sistem)
-10. [Alur Data & Integrasi Wilayah](#alur-data--integrasi-wilayah)
-11. [API Utama](#api-utama)
-12. [Fitur Utama](#fitur-utama)
-13. [Testing](#testing)
-14. [Panduan Deployment](#panduan-deployment)
-15. [Monitoring & Maintenance](#monitoring--maintenance)
-16. [Tips Troubleshooting](#tips-troubleshooting)
-17. [Roadmap & Ide Pengembangan](#roadmap--ide-pengembangan)
-18. [Lisensi](#lisensi)
+4. [Requirements](#2-requirements)
+5. [Setup Backend (Laravel)](#3-setup-backend-laravel)
+6. [Setup Frontend (React)](#4-setup-frontend-react)
+7. [Soft Maintenance Mode](#5-soft-maintenance-mode-ringkasan)
+8. [Fitur Utama](#fitur-utama)
+9. [API Utama](#api-utama)
+10. [Tips Troubleshooting](#tips-troubleshooting)
+11. [Deploy ke Hosting & Domain Lain](#6-deploy-ke-hosting--domain-lain)
+12. [Kontak](#7-kontak)
 
 ---
 
-## Ringkasan Proyek
+## 1. Arsitektur & Teknologi
 
-Sistem ini menyediakan backend API dan antarmuka admin terpadu untuk:
+- **Frontend**
+  - React 18 (SPA)
+  - React Router DOM 6
+  - @tanstack/react-query
+  - Tailwind CSS (via CDN)
+  - Lucide React (ikon)
+  - Framer Motion (animasi)
+  - React Hook Form + Zod (validasi form)
+  - React Hot Toast (notifikasi)
 
-- Mengelola data instansi, laporan, dan evaluasi.
-- Menyajikan analitik (grafik, KPI, metrik pengunjung).
-- Mengintegrasikan hierarki wilayah Jawa Timur (provinsi, kabupaten/kota, kecamatan, desa) secara otomatis dari API [wilayah.web.id](https://wilayah.web.id/api/regencies/35).
-- Memberikan pengalaman administrasi yang responsif dan dinamis memanfaatkan React + Tailwind.
+- **Backend**
+  - Laravel (versi 11+)
+  - PHP 8.2+
+  - MySQL / MariaDB
+  - Laravel Sanctum / token-based auth
+  - Mailer (SMTP) untuk pengiriman OTP reset password
 
-Arsitektur yang digunakan memisahkan backend Laravel dan frontend React/Vite sehingga mudah dikembangkan dan di-deploy secara independen.
-
-## Teknologi Utama
-
-| Layer        | Teknologi | Keterangan |
-|--------------|-----------|------------|
-| Backend      | Laravel 11, PHP 8.2, Sanctum | REST API, autentikasi token, Artisan command untuk import wilayah |
-| Frontend     | React 19, TypeScript, Vite, Tailwind CSS | Dashboard admin, chart (Chart.js + react-chartjs-2), animasi (Framer Motion) |
-| Data & Util  | MySQL/PostgreSQL (disarankan), utility HTTP custom | Penyimpanan data GER-MAS dan hierarki wilayah |
-| DevOps       | npm, Composer | Manajemen dependency dan script dev |
+- **Lainnya**
+  - CORS terkonfigurasi untuk memisahkan domain API dan domain frontend
+  - Soft maintenance mode via file flag JSON di `storage/framework`
 
 ## Struktur Direktori
 
-```
-germas/
-├── backend/                 # Aplikasi Laravel (API & konsol)
-│   ├── app/
-│   │   ├── Console/Commands/ImportEastJavaRegions.php
-│   │   ├── Http/Controllers/RegionController.php
-│   │   └── Http/Resources/{Province,Regency}Resource.php
-│   ├── database/migrations/2025_12_17_000600_create_regions_tables.php
-│   ├── routes/api.php
-│   └── ... (struktur standar Laravel)
-├── pages/                   # Halaman React (tanpa Next.js)
-│   └── admin/Regions.tsx    # Halaman Wilayah dinamis
-├── components/, utils/      # Komponen UI dan helper frontend
-├── public/, src/            # Entry Vite, konfigurasi Tailwind, dll.
-├── package.json             # Dependensi frontend + script Vite
-├── composer.json            # Dependensi backend Laravel
-└── README.md                # Dokumen ini
+Struktur project ini kurang lebih:
+
+```text
+germas-jatim/
+├─ backend/              # Aplikasi Laravel (API, otentikasi, OTP, dsb.)
+├─ components/           # Komponen UI frontend (React)
+├─ pages/                # Halaman React (Home, Login, Admin, dll.)
+├─ utils/                # Helper frontend (apiClient, pdf generator, dsb.)
+├─ index.html            # Entry HTML SPA
+├─ index.tsx / App.tsx   # Entry React
+└─ README.md             # Dokumen ini
 ```
 
-> **Catatan:** folder `backend` berjalan sebagai aplikasi Laravel penuh; direktori root berisi codebase React/Vite yang mengonsumsi API backend.
+---
 
-### Struktur Database Wilayah
+## 2. Requirements
 
-```
-provinces
-├── regencies
-│   ├── districts
-│   │   └── villages
-```
+Pastikan environment server/localhost memenuhi:
 
-Masing-masing tabel memiliki kolom `code` sesuai kode resmi Kemendagri, sehingga mudah dihubungkan dengan sistem eksternal lain yang membutuhkan kode wilayah.
+- **Node.js**: versi LTS terbaru (>= 18 disarankan)
+- **npm** atau **yarn**
+- **PHP**: 8.2 atau lebih baru
+- **Composer**: versi terbaru
+- **Database**: MySQL 5.7+ / MariaDB setara
+- **Web Server**: Nginx atau Apache (untuk hosting produksi)
+- **Ekstensi PHP umum**: `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `curl`, `json`, `fileinfo`
+- Akses ke SMTP server (untuk fitur email OTP reset password)
 
-## Prasyarat
+---
 
-- **Node.js** ≥ 20 (disarankan LTS terbaru)
-- **npm** ≥ 10
-- **PHP** ≥ 8.2
-- **Composer** ≥ 2.6
-- **Database** MySQL 8 atau PostgreSQL 14 (pilih salah satu)
-- Ekstensi PHP yang umum (pdo, mbstring, openssl, dll.)
-- Git untuk version control (opsional tapi direkomendasikan)
+## 3. Setup Backend (Laravel)
 
-## Konfigurasi Lingkungan
+> Lokasi: `backend/`
 
-### Backend (`backend/.env`)
-
-Salin `.env.example` menjadi `.env` kemudian sesuaikan konfigurasi berikut:
-
-```env
-APP_NAME="Germas Jatim"
-APP_URL=http://localhost:8000
-
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=[dbname]
-DB_USERNAME=root
-DB_PASSWORD=[pass]
-
-SANCTUM_STATEFUL_DOMAINS=localhost:5173
-FRONTEND_URL=http://localhost:5173
-```
-
-Jangan lupa set `QUEUE_CONNECTION`, `MAIL_*`, atau konfigurasi lain sesuai kebutuhan produksi.
-
-Tambahkan konfigurasi tambahan bila menggunakan fitur lanjutan (mis. storage S3, SMTP, broadcast) sesuai dokumentasi Laravel.
-
-### Frontend (`.env` di root)
-
-Jika diperlukan, buat file `.env` dengan variabel berikut:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000/api
-```
-
-Sesuaikan URL berdasarkan lingkungan deploy.
-
-### Variabel Lingkungan Tambahan (Opsional)
-
-| Variabel | Contoh Nilai | Fungsi |
-|----------|--------------|--------|
-| `VITE_APP_NAME` | Germas Admin | Menampilkan nama aplikasi di UI |
-| `QUEUE_CONNECTION` | database | Mengatur koneksi queue Laravel |
-| `LOG_CHANNEL` | stack | Channel log utama |
-| `LOG_SLACK_WEBHOOK_URL` | https://hooks.slack.com/... | Notifikasi error ke Slack |
-
-## Langkah Instalasi
-
-### 1. Kloning repositori
-
-```bash
-git clone https://github.com/dextryayers/germas-jatim.git
-cd germas-jatim
-```
-
-### 2. Instal dependensi frontend
-
-```bash
-npm install
-```
-
-### 3. Instal dependensi backend
+### 3.1. Install Dependensi
 
 ```bash
 cd backend
 composer install
 ```
 
-### 4. Siapkan file .env
+### 3.2. Konfigurasi Environment
+
+1. Duplikasi file `.env.example` menjadi `.env` (jika belum ada):
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Sesuaikan variabel penting di `.env`:
+
+   ```env
+   APP_NAME="SI-PORSI GERMAS"
+   APP_ENV=production
+   APP_KEY=base64:...        # jalankan artisan key:generate
+   APP_DEBUG=false
+   APP_URL=https://api.domain-anda.com  # URL API
+
+   # Database
+   DB_CONNECTION=mysql
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_DATABASE=germas_jatim
+   DB_USERNAME=nama_user
+   DB_PASSWORD=password
+
+   # Mail (untuk OTP reset password)
+   MAIL_MAILER=smtp
+   MAIL_HOST=smtp.domain-anda.com
+   MAIL_PORT=587
+   MAIL_USERNAME=nama_akun
+   MAIL_PASSWORD=kata_sandi
+   MAIL_ENCRYPTION=tls
+   MAIL_FROM_ADDRESS=no-reply@domain-anda.com
+   MAIL_FROM_NAME="SI-PORSI GERMAS"
+
+   # CORS / Frontend URL
+   FRONTEND_URL=https://domain-frontend-anda.com
+   ````
+
+3. Generate app key:
+
+   ```bash
+   php artisan key:generate
+   ```
+
+### 3.3. Migrasi Database & Seeder (opsional)
 
 ```bash
-cp backend/.env.example backend/.env
-cp .env.example .env        # jika tersedia untuk frontend
-```
-
-Edit nilai variabel sesuai prasyarat.
-
-### 5. Generate key & migrasi database
-
-```bash
-php artisan key:generate
 php artisan migrate
+# Jika ada seeder:
+php artisan db:seed
 ```
 
-### 6. Import data wilayah Jawa Timur
+### 3.4. Jalankan Server Backend (Local)
 
 ```bash
-php artisan regions:import-east-java --force
+php artisan serve --host=0.0.0.0 --port=8000
 ```
 
-Perintah ini akan menarik data dari `wilayah.web.id` dan menyimpannya ke tabel `provinces`, `regencies`, `districts`, `villages`.
+Sekarang API akan tersedia di `http://localhost:8000`.
 
-### 7. Jalankan server pengembangan
+> **Catatan:** Pastikan konfigurasi CORS di `config/cors.php` mencantumkan domain frontend Anda pada `allowed_origins` dan path API sesuai (`/api/*`).
 
-Frontend (Vite):
+---
+
+## 4. Setup Frontend (React)
+
+> Lokasi: root project (`germas-jatim/`)
+
+### 4.1. Install Dependensi
+
+```bash
+npm install
+```
+
+### 4.2. Konfigurasi Environment Frontend
+
+Frontend membaca konfigurasi dari file `.env` di root (sudah dibuat secara manual di project ini). Jika ingin menyesuaikan:
+
+```env
+VITE_API_BASE_URL=https://api.domain-anda.com/api
+VITE_MAINTENANCE_BYPASS_KEY=germas-admin   # contoh key bypass soft maintenance
+```
+
+Sesuaikan `VITE_API_BASE_URL` dengan URL API Laravel Anda pada environment baru.
+
+### 4.3. Jalankan Frontend (Local)
 
 ```bash
 npm run dev
 ```
 
-Backend (Laravel):
-
-```bash
-php artisan serve
-```
-
-Secara default, frontend berjalan di `http://localhost:5173` dan backend di `http://127.0.0.1:8000`.
-
-## Konfigurasi Role & Data Awal
-
-1. Buat akun admin pertama melalui endpoint registrasi admin atau seeding manual.
-2. Jika menggunakan seeder:
-   ```bash
-   php artisan db:seed --class=AdminSeeder
-   ```
-3. Masuk ke panel admin, periksa data instansi, dan gunakan fitur import wilayah untuk memastikan hierarki terisi.
-4. Sesuaikan level instansi/roles melalui menu administrasi sesuai struktur organisasi.
-
-## Perintah Harian
-
-```bash
-# Menjalankan kedua stack sekaligus (opsional via composer)
-composer run dev
-
-# Menjalankan queue listener (jika menggunakan job)
-php artisan queue:listen
-
-# Membersihkan cache konfigurasi
-php artisan config:clear
-php artisan route:clear
-
-# Build frontend untuk produksi
-npm run build
-```
-
-## Arsitektur Sistem
-
-```
-┌───────────────┐       ┌──────────────────┐       ┌────────────────────┐
-│ React (Vite)  │  API  │ Laravel Sanctum   │  DB   │ MySQL/PostgreSQL    │
-│ pages/admin   │ <───► │ Controllers +     │ <───► │ provinces/regencies │
-│ components UI │       │ Resources         │       │ districts/villages  │
-└───────────────┘       └──────────────────┘       └────────────────────┘
-```
-
-- **Frontend**: SPA React dengan routing manual (React Router). Konsumsi API via `utils/apiClient.ts` yang menangani CSRF & auth token.
-- **Backend**: Laravel API dengan Sanctum untuk SPA auth, Resource classes untuk formatting JSON, Artisan command untuk import, dan migrasi custom wilayah.
-- **Database**: Relasi berjenjang memudahkan query statistik (menggunakan eager loading dan aggregate counts).
-
-## Alur Data & Integrasi Wilayah
-
-1. **Import** – `php artisan regions:import-east-java` menarik seluruh hirarki kabupaten/kota → kecamatan → desa dan menyimpannya ke database lokal.
-2. **API** – Endpoint Laravel (`/api/regions`, `/api/regions/{regency}/districts`, `/api/districts/{district}/villages`) menyajikan data terstruktur untuk frontend.
-3. **Frontend** – Halaman `pages/admin/Regions.tsx` memanggil API melalui `utils/apiClient.ts`, menerapkan filter (tipe kab/kota, pencarian teks), dan menampilkan statistik + chart + detail yang dapat diperluas.
-
-Diagram sederhana:
-
-```
-wilayah.web.id API → Artisan Import Command → Database Lokal → REST API Laravel → React Admin UI
-```
-
-## API Utama
-
-| Endpoint | Method | Deskripsi |
-|----------|--------|-----------|
-| `/api/regions` | GET | Mendapatkan daftar kab/kota di provinsi kode 35 (Jawa Timur) beserta ringkasan jumlah kecamatan/desa |
-| `/api/regions/{regency}/districts` | GET | Mendapatkan kecamatan dan desa dalam kab/kota tertentu |
-| `/api/districts/{district}/villages` | GET | Mendapatkan seluruh desa untuk kecamatan tertentu |
-| `/api/dashboard` | GET | Data KPI dashboard (laporan, evaluasi, pengunjung, dll.) |
-
-> Semua endpoint berada di balik middleware Sanctum. Pastikan frontend melakukan autentikasi sebelum memanggil API.
-
-## Fitur Utama
-
-- **Dashboard Analitik**: Grafik pengunjung, KPI laporan/evaluasi, histori aktivitas.
-- **Manajemen Instansi**: Registrasi admin, pengelolaan level instansi.
-- **Pelaporan Evaluasi**: Input, verifikasi, dan ekspor format PDF/Excel.
-- **Wilayah Jawa Timur Dinamis**: Integrasi penuh dari provinsi hingga desa termasuk statistik jumlah kecamatan/desa per kabupaten/kota.
-- **Autentikasi Aman**: Laravel Sanctum dengan dukungan SPA.
-- **UI Modern**: Tailwind + Framer Motion untuk interaksi yang halus.
-
-### Fitur Wilayah Jawa Timur
-
-- Filter kab/kota berdasarkan tipe (kabupaten/kota) dan kata kunci.
-- Grafik perbandingan jumlah kecamatan dan desa tiap kab/kota.
-- Panel detail dengan lazy-loading kecamatan & desa untuk efisiensi.
-- Penghitungan statistik total yang selalu sinkron dengan filter aktif.
-
-## Testing
-
-### Backend
-
-- Unit & Feature Test (PHPUnit):
-  ```bash
-  php artisan test
-  ```
-- Pastikan membuat database testing (`DB_DATABASE` khusus) dan jalankan migrasi menggunakan `php artisan migrate --env=testing` jika diperlukan.
-
-### Frontend
-
-- Tambahkan testing dengan Vitest/React Testing Library (belum diset). Rekomendasi skrip:
-  ```bash
-  npm install -D vitest @testing-library/react @testing-library/jest-dom
-  npm run test
-  ```
-- Gunakan script `npm run lint` (jika eslint dikonfigurasi) untuk menjaga kualitas kode.
-
-## Panduan Deployment
-
-### Backend
-
-1. Upload folder `backend` ke server PHP (Laravel-friendly) atau gunakan container Docker.
-2. Jalankan `composer install --optimize-autoloader --no-dev`.
-3. Set variabel lingkungan di `.env` produksi, termasuk `APP_ENV=production`, `APP_DEBUG=false`.
-4. Jalankan `php artisan migrate --force`.
-5. Import atau perbarui data wilayah: `php artisan regions:import-east-java --force` (jadwalkan via cron jika perlu pembaruan berkala).
-6. Konfigurasi queue dan schedule (opsional) lewat `crontab`.
-
-### Frontend
-
-1. Di root proyek, jalankan `npm run build`.
-2. Deploy folder `dist/` ke web server static (Nginx/Apache) atau layanan hosting static (Netlify, Vercel, dsb).
-3. Pastikan environment `VITE_API_BASE_URL` mengarah ke domain backend produksi.
-
-### Integrasi
-
-- Jika frontend dan backend berada pada domain berbeda, pastikan CORS dan Sanctum stateful domains sudah diatur.
-- Gunakan HTTPS di kedua sisi untuk menghindari masalah cookie/security.
-
-## Monitoring & Maintenance
-
-- **Log Monitoring**: Gunakan `storage/logs/laravel.log` atau integrasikan dengan log central (ELK, Sentry).
-- **Backup Database**: Jadwalkan backup harian/mingguan. Contoh cron:
-  ```bash
-  0 2 * * * mysqldump -u root -pPASSWORD germas > /backup/germas_$(date +\%F).sql
-  ```
-- **Job Scheduler**: Tambahkan ke `crontab` untuk menjalankan `php artisan schedule:run` setiap menit.
-- **Pembaruan Wilayah**: Jika API eksternal memperbarui data, jalankan ulang `regions:import-east-java` secara berkala.
-- **Security Patch**: Rutin jalankan `composer update` dan `npm update` setiap sprint, kemudian regression test.
-
-## Tips Troubleshooting
-
-| Masalah | Penyebab Umum | Solusi |
-|---------|----------------|--------|
-| **Migrasi gagal** | Tabel sudah ada / DB kosong | Jalankan migrasi spesifik: `php artisan migrate --path=database/migrations/2025_12_17_000600_create_regions_tables.php --force` |
-| **Import wilayah gagal** | API eksternal tidak merespon | Pastikan koneksi internet server stabil, coba ulang perintah atau gunakan opsi `--skip-villages` bila perlu |
-| **Frontend tidak menampilkan data** | `VITE_API_BASE_URL` salah / token tidak valid | Cek konfigurasi env, pastikan backend berjalan dan akses token Sanctum diberikan |
-| **Grafik kosong** | Backend mengembalikan data 0 | Frontend memiliki fallback, namun pastikan data agregat tersedia di API Dashboard |
-| **CORS error** | Konfigurasi SANCTUM_STATEFUL_DOMAINS belum benar | Sesuaikan domain frontend & backend, jalankan `php artisan config:clear`
-
-## Roadmap & Ide Pengembangan
-
-- Mode offline untuk input laporan ketika koneksi terbatas.
-- Dashboard publik dengan statistik ringkas yang dapat diembed.
-- Integrasi Single Sign-On (SSO) untuk instansi pemerintah daerah.
-- Mekanisme sinkronisasi incremental jika sumber data wilayah berubah.
-- Penerapan automated testing penuh (CI/CD pipeline, coverage metrics).
-
-## Lisensi
-
-Proyek ini menggunakan lisensi **MIT** (mengikuti lisensi default Laravel). Silakan modifikasi sesuai kebutuhan organisasi Anda.
+Secara default aplikasi akan berjalan di `http://localhost:5173` (atau port lain sesuai konfigurasi dev server).
 
 ---
 
-**Dukungan & Kontribusi**
+## 5. Soft Maintenance Mode (Ringkasan)
 
-- Buat issue atau pull request untuk perbaikan/fitur baru.
-- Dokumentasikan perubahan besar di README atau `CHANGELOG.md` (buat baru bila diperlukan).
+SI-PORSI GERMAS menggunakan **soft maintenance mode**, *bukan* `php artisan down`, sehingga:
 
-Selamat menggunakan Sistem Evaluasi & Pelaporan Germas Jawa Timur!
+- Pengguna umum akan diarahkan ke halaman maintenance.
+- Admin dengan hak tertentu tetap bisa login dan mematikan maintenance.
+- Admin dapat bypass melalui query `?maintenance_key=...` sesuai konfigurasi `VITE_MAINTENANCE_BYPASS_KEY`.
+
+Endpoint backend utama:
+
+- `GET /api/maintenance/status` – status maintenance (public)
+- `POST /api/admin/maintenance/enable` – aktifkan soft maintenance (admin)
+- `POST /api/admin/maintenance/disable` – matikan soft maintenance (admin)
+
+Pastikan route dan middleware telah terkonfigurasi sesuai pada file:
+
+- `backend/routes/api.php`
+- `backend/app/Http/Controllers/MaintenanceController.php`
+
+---
+
+## Fitur Utama
+
+Ringkasan beberapa fitur utama yang tersedia di SI-PORSI GERMAS:
+
+- **Pelaporan & Evaluasi GERMAS**  
+  Formulir evaluasi dan pelaporan GERMAS pada tatanan tempat kerja, dengan data yang tersimpan di backend Laravel.
+
+- **Dashboard Admin**  
+  Admin provinsi / kabupaten/kota dapat melihat arsip laporan yang sudah diverifikasi, mengunduh PDF, dan mengelola pengaturan tertentu (misalnya maintenance mode).
+
+- **Manajemen Akun & Otentikasi**  
+  Sistem login admin dengan penyimpanan token di browser, halaman profil, serta pembatasan akses ke halaman tertentu berdasarkan peran (misalnya akses khusus ke halaman Pengaturan untuk peran tertentu).
+
+- **Reset Password dengan OTP Email**  
+  Lupa password ditangani melalui alur OTP yang dikirim ke email instansi. Template email OTP berada di `backend/resources/views/emails/password-otp.blade.php`.
+
+- **Soft Maintenance Mode**  
+  Mode pemeliharaan lunak yang memblokir pengguna umum dari aplikasi, namun tetap mengizinkan admin tertentu untuk login dan mematikan maintenance, termasuk dukungan bypass melalui query `maintenance_key`.
+
+---
+
+## API Utama
+
+Beberapa endpoint yang sering digunakan oleh frontend (dengan asumsi prefix dasar `/api` sudah dikonfigurasi di Laravel):
+
+### Autentikasi & Profil
+
+- `POST /auth/login` – login admin, mengembalikan token dan informasi pengguna.
+- `GET /auth/me` – mendapatkan profil pengguna yang sedang login.
+
+### Pelaporan & Evaluasi
+
+- `GET /evaluasi/submissions` – daftar pengajuan evaluasi (misalnya untuk arsip terverifikasi).
+- `GET /laporan/submissions` – daftar pengajuan laporan.
+
+### Wilayah Asal
+
+- `GET /regions?province_code=35` – mendapatkan daftar kabupaten/kota di Provinsi Jawa Timur.
+- `GET /regions/{regencyId}/districts` – mendapatkan kecamatan untuk kabupaten/kota tertentu.
+- `GET /districts/{districtId}/villages` – mendapatkan desa/kelurahan untuk kecamatan tertentu.
+
+### Maintenance
+
+- `GET /maintenance/status` – cek status soft maintenance (public, tanpa autentikasi).
+- `POST /admin/maintenance/enable` – aktifkan soft maintenance (hanya admin).
+- `POST /admin/maintenance/disable` – nonaktifkan soft maintenance (hanya admin).
+
+> **Catatan:** Nama dan struktur endpoint di atas mengikuti pola yang digunakan di kode frontend dan konfigurasi routes Laravel pada project ini. Sesuaikan dokumentasi ini jika nanti ada perubahan pada routes API.
+
+---
+
+## Tips Troubleshooting
+
+Beberapa masalah umum dan cara mengeceknya:
+
+### 1. CORS Error saat memanggil API
+
+**Gejala:** Pesan error di konsol browser seperti *"CORS request did not succeed"* atau *"No 'Access-Control-Allow-Origin' header is present"*.
+
+- Pastikan `APP_URL` di `.env` backend mengarah ke domain API yang benar (misal `https://api.domain-anda.com`).
+- Pastikan `FRONTEND_URL` atau daftar `allowed_origins` di `config/cors.php` sudah mencantumkan domain frontend (misal `https://domain-frontend-anda.com`).
+- Pastikan `VITE_API_BASE_URL` di `.env` frontend mengarah ke `/api` dari domain backend yang benar.
+- Setelah mengubah konfigurasi, jalankan `php artisan config:clear` dan restart server jika perlu.
+
+### 2. Admin ikut terblokir saat Maintenance Aktif
+
+- Pastikan soft maintenance yang digunakan adalah versi “lunak” (bukan `php artisan down`).
+- Cek konfigurasi `VITE_MAINTENANCE_BYPASS_KEY` pada `.env` frontend dan gunakan query `?maintenance_key=...` sesuai nilai tersebut saat mengakses aplikasi.
+- Pastikan token login admin masih valid (coba login ulang jika perlu).
+
+### 3. OTP Reset Password Tidak Masuk ke Email
+
+- Periksa konfigurasi `MAIL_*` di `.env` backend (host, port, username, password, encryption).
+- Coba kirim email uji (misalnya dari Tinker atau route sederhana) untuk memastikan koneksi SMTP benar.
+- Periksa folder spam di email penerima.
+
+### 4. Frontend Tidak Bisa Terhubung ke API di Server Baru
+
+- Cek kembali nilai `VITE_API_BASE_URL` di `.env` frontend dan pastikan sudah di-build ulang (`npm run build`) setelah mengubah env.
+- Pastikan server backend dapat diakses langsung dari browser dengan membuka `https://api.domain-anda.com/api/status` atau endpoint lain yang publik.
+- Pastikan tidak ada blokir firewall atau konfigurasi SSL yang salah.
+
+---
+
+## 6. Deploy ke Hosting & Domain Lain
+
+Berikut gambaran umum untuk deploy di server produksi dengan domain terpisah untuk API dan frontend.
+
+### 6.1. Deploy Backend (Laravel API)
+
+1. **Upload kode** folder `backend` ke server (via git/SSH/FTP).
+2. Jalankan perintah di server:
+
+   ```bash
+   cd backend
+   composer install --no-dev --optimize-autoloader
+
+   cp .env.example .env   # jika belum ada
+   php artisan key:generate
+
+   php artisan migrate --force
+   php artisan config:cache
+   php artisan route:cache
+   php artisan view:cache
+   ```
+
+3. Pastikan **document root** web server untuk API mengarah ke folder `backend/public`.
+4. Set `APP_URL` ke `https://api.domain-anda.com` dan `FRONTEND_URL` ke `https://domain-frontend-anda.com`.
+5. Konfigurasi **CORS** di `config/cors.php`:
+
+   - Tambahkan domain frontend di `allowed_origins` (misal `https://domain-frontend-anda.com`).
+   - Pastikan `paths` mencakup `/api/*` dan endpoint lain yang diperlukan.
+
+6. Konfigurasikan **cron / supervisor** (jika ada queue email) sesuai kebutuhan.
+
+### 6.2. Deploy Frontend (React SPA)
+
+1. Sesuaikan file `.env` frontend:
+
+   ```env
+   VITE_API_BASE_URL=https://api.domain-anda.com/api
+   VITE_MAINTENANCE_BYPASS_KEY=germas-admin
+   ```
+
+2. Build untuk produksi:
+
+   ```bash
+   npm run build
+   ```
+
+   Hasil build (misalnya di folder `dist/`) berisi file statis HTML/CSS/JS.
+
+3. Upload isi folder build ke hosting static (misal folder public domain `domain-frontend-anda.com`).
+
+4. Pastikan konfigurasi web server untuk SPA:
+
+   - Semua path (kecuali asset statis) diarahkan ke `index.html`.
+   - Contoh Nginx (ilustrasi):
+
+     ```nginx
+     location / {
+         try_files $uri /index.html;
+     }
+     ```
+
+5. Setelah deploy, uji:
+
+   - Akses Home, Formulir, dan halaman Admin.
+   - Login admin, cek fetch data, dan cek reset password (email OTP).
+   - Coba aktifkan & nonaktifkan soft maintenance dari halaman Settings admin.
+
+### 6.3. Checklist Sebelum Go-Live
+
+- **[ ]** APP_URL (backend) dan FRONTEND_URL sudah benar.
+- **[ ]** VITE_API_BASE_URL mengarah ke domain API yang benar.
+- **[ ]** CORS mengizinkan domain frontend produksi.
+- **[ ]** Koneksi database produksi berjalan normal.
+- **[ ]** SMTP teruji dan email OTP terkirim.
+- **[ ]** Soft maintenance berfungsi: user publik terblokir, admin tetap bisa masuk.
+
+
+---
+
+## 7. Kontak
+
+Jika terdapat kendala saat setup atau deploy:
+
+- **Instansi**: Dinas Kesehatan Provinsi Jawa Timur
+- **Website**: https://dinkes.jatimprov.go.id
+- **Email**: dinkes@jatimprov.go.id
+
+---
+

@@ -17,6 +17,8 @@ class EvaluationAnswerResource extends JsonResource
             'question_text' => $this->question_text,
             'answer_value' => $this->answer_value,
             'remark' => $this->remark,
+            'cluster_id' => $this->question?->cluster_id,
+            'cluster_title' => $this->question?->cluster?->title,
         ];
     }
 }

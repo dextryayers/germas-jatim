@@ -32,7 +32,7 @@ const NotFound: React.FC = () => {
         </motion.div>
 
         <h1 className="text-6xl font-bold text-slate-800 mb-2">404</h1>
-        <h2 className="text-xl font-semibold text-slate-600 mb-4">Halaman Tidak Ditemukan, wkwkkwk</h2>
+        <h2 className="text-xl font-semibold text-slate-600 mb-4">Halaman Tidak Ditemukan</h2>
         <p className="text-slate-500 mb-8 leading-relaxed">
           Maaf, halaman yang anda tuju tidak dapat ditemukan atau telah dipindahkan ke alamat lain.
         </p>

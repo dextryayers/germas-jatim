@@ -18,11 +18,15 @@ class LaporanSubmissionController extends Controller
     {
         $perPage = min(max($request->integer('per_page', 15), 1), 100);
 
+        $user = $request->user();
+
         $submissions = LaporanSubmission::query()
+            ->forAdminUser($user)
             ->with([
                 'instansi',
                 'instansiLevel',
                 'template' => fn ($query) => $query->with(['sections' => fn ($builder) => $builder->orderBy('sequence')]),
+                'sections',
                 'submittedBy',
             ])
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->input('status')))
@@ -61,8 +65,11 @@ class LaporanSubmissionController extends Controller
                 'instansi_name' => $data['instansi_name'],
                 'instansi_level_id' => $data['instansi_level_id'] ?? null,
                 'instansi_level_text' => $data['instansi_level_text'] ?? null,
+                'origin_regency_id' => $data['origin_regency_id'] ?? null,
+                'origin_regency_name' => $data['origin_regency_name'] ?? null,
                 'report_year' => $data['report_year'],
                 'report_level' => $data['report_level'] ?? null,
+                'is_late' => $data['is_late'] ?? false,
                 'status' => 'pending',
                 'notes' => $data['notes'] ?? null,
                 'submitted_by' => $userId,
@@ -70,8 +77,12 @@ class LaporanSubmissionController extends Controller
             ]);
 
             $sectionsPayload = $sectionsInput->map(function ($section) {
+                $rawSectionId = $section['section_id'] ?? null;
+
                 return [
-                    'section_id' => $section['section_id'] ?? null,
+                    // Pastikan section_id yang disimpan ke DB selalu integer atau null,
+                    // tidak pernah string sembarang seperti "s1".
+                    'section_id' => is_numeric($rawSectionId) ? (int) $rawSectionId : null,
                     'section_code' => $section['section_code'] ?? null,
                     'section_title' => $section['section_title'],
                     'target_year' => $section['target_year'] ?? null,

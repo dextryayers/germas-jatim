@@ -21,6 +21,7 @@ class UserResource extends JsonResource
 
         return [
             'id' => $user->id,
+            'username' => $user->username,
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
@@ -42,6 +43,22 @@ class UserResource extends JsonResource
                 'code' => $user->instansiLevel->code,
                 'name' => $user->instansiLevel->name,
                 'description' => $user->instansiLevel->description,
+            ] : null,
+            'origin_regency' => $user->originRegency ? [
+                'id' => $user->originRegency->id,
+                'code' => $user->originRegency->code,
+                'name' => $user->originRegency->name,
+                'type' => $user->originRegency->type,
+            ] : null,
+            'origin_district' => $user->originDistrict ? [
+                'id' => $user->originDistrict->id,
+                'code' => $user->originDistrict->code,
+                'name' => $user->originDistrict->name,
+            ] : null,
+            'origin_village' => $user->originVillage ? [
+                'id' => $user->originVillage->id,
+                'code' => $user->originVillage->code,
+                'name' => $user->originVillage->name,
             ] : null,
         ];
     }

@@ -34,17 +34,40 @@ return new class extends Migration
 
         Schema::create('users', function (Blueprint $table) {
             $table->id();
+
+            // Data kredensial & identitas dasar yang diinput saat registrasi admin
+            $table->string('username')->unique();
             $table->string('name');
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
-            $table->enum('role', ['super_admin', 'admin', 'verifikator', 'viewer'])->default('admin');
+
+            // Role disesuaikan dengan seluruh varian yang digunakan di aplikasi
+            $table->enum('role', [
+                'super_admin',
+                'admin',
+                'admin_provinsi',
+                'admin_kabkota',
+                'admin_kecamatan',
+                'admin_kelurahan',
+                'admin_desa'
+            ])->default('admin');
+
+            // Keterkaitan dengan instansi & level instansi
             $table->foreignId('instansi_id')->nullable()->constrained('instansi')->nullOnDelete();
             $table->foreignId('instansi_level_id')->nullable()->constrained('instansi_levels')->nullOnDelete();
+
+            // Asal wilayah admin (diisi sesuai pilihan Kab/Kota, Kecamatan, Desa/Kelurahan pada registrasi)
+            $table->foreignId('origin_regency_id')->nullable()->constrained('regencies')->nullOnDelete();
+            $table->foreignId('origin_district_id')->nullable()->constrained('districts')->nullOnDelete();
+            $table->foreignId('origin_village_id')->nullable()->constrained('villages')->nullOnDelete();
+
+            // Informasi tambahan yang sudah digunakan di aplikasi (kode admin, kontak, foto, last login)
             $table->string('admin_code', 10)->nullable()->index();
             $table->string('phone', 30)->nullable();
             $table->string('photo_url')->nullable();
             $table->timestamp('last_login_at')->nullable();
+
             $table->rememberToken();
             $table->timestamps();
         });

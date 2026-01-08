@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Users, Settings, Menu, FileCheck, Home, FileText, ChevronRight, ChevronLeft, LogOut, User, ClipboardList } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
 import { showConfirmation, showSuccess } from '../../utils/alerts';
 import logoGermas from '../../components/svg/logo-germas.svg';
+import { apiClient } from '../../utils/apiClient';
 
 const AdminLayout: React.FC = () => {
   const location = useLocation();
@@ -20,18 +20,130 @@ const AdminLayout: React.FC = () => {
     setMobileOpen(false);
   }, [location]);
 
-  const userName = useMemo(() => sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name') ?? 'Administrator', []);
-  const userEmail = useMemo(() => sessionStorage.getItem('user_email') ?? localStorage.getItem('user_email') ?? 'admin@germas.local', []);
+  const [userName, setUserName] = useState<string>('Administrator');
+  const [userEmail, setUserEmail] = useState<string>('admin@germas.local');
+  const [userPhoto, setUserPhoto] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      setUserName(sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name') ?? 'Administrator');
+      setUserEmail(sessionStorage.getItem('user_email') ?? localStorage.getItem('user_email') ?? 'admin@germas.local');
+      setUserPhoto(sessionStorage.getItem('user_photo_url') ?? localStorage.getItem('user_photo_url'));
+      setUserRole(sessionStorage.getItem('user_role') ?? localStorage.getItem('user_role'));
+    };
+
+    syncFromStorage();
+    window.addEventListener('auth-change', syncFromStorage);
+
+    const token = sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
+    if (token) {
+      type MeResponse = {
+        status: string;
+        user: {
+          name: string;
+          email: string;
+          photo_url?: string | null;
+        };
+      };
+
+      apiClient
+        .get<MeResponse>('/auth/me')
+        .then((response) => {
+          const name = response.user?.name ?? null;
+          const email = response.user?.email ?? null;
+          const photo = response.user?.photo_url ?? null;
+
+          if (name) {
+            sessionStorage.setItem('user_name', name);
+            localStorage.setItem('user_name', name);
+          }
+          if (email) {
+            sessionStorage.setItem('user_email', email);
+            localStorage.setItem('user_email', email);
+          }
+          if (photo) {
+            sessionStorage.setItem('user_photo_url', photo);
+            localStorage.setItem('user_photo_url', photo);
+          } else {
+            sessionStorage.removeItem('user_photo_url');
+            localStorage.removeItem('user_photo_url');
+          }
+
+          syncFromStorage();
+        })
+        .catch(() => {
+          /* ignore - fallback to cached storage */
+        });
+    }
+
+    return () => {
+      window.removeEventListener('auth-change', syncFromStorage);
+    };
+  }, []);
+
+  const avatarSrc = useMemo(() => {
+    if (userPhoto) return userPhoto;
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=0ea5e9&color=fff`;
+  }, [userPhoto, userName]);
 
   const menuItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'Verifikasi Laporan', path: '/admin/verifikasi', icon: FileCheck },
     { label: 'Manajemen Formulir', path: '/admin/forms', icon: ClipboardList }, // New Menu
-    { label: 'Data Wilayah', path: '/admin/wilayah', icon: FileText },
     { label: 'Manajemen User', path: '/admin/users', icon: Users },
     { label: 'Profil Saya', path: '/admin/profile', icon: User },
     { label: 'Pengaturan', path: '/admin/settings', icon: Settings },
   ];
+
+  const effectiveRole = (userRole ?? '').toLowerCase().trim();
+
+  const canAccessSettings =
+    effectiveRole.includes('super_admin') ||
+    effectiveRole.includes('admin_provinsi');
+
+  const isMenuItemVisible = (label: string): boolean => {
+    if (label === 'Manajemen Formulir') {
+      return (
+        effectiveRole.includes('super_admin') ||
+        effectiveRole.includes('admin_provinsi')
+      );
+    }
+
+    if (label === 'Manajemen User') {
+      if (!effectiveRole) return false;
+
+      if (
+        effectiveRole.includes('super_admin') ||
+        effectiveRole.includes('admin_provinsi')
+      ) {
+        return true;
+      }
+
+      if (
+        effectiveRole.includes('admin_kabkota') ||
+        effectiveRole.includes('admin_kecamatan')
+      ) {
+        return true;
+      }
+
+      return false;
+    }
+
+    if (label === 'Pengaturan') {
+      // Halaman Pengaturan hanya untuk admin_provinsi (dan super_admin bila ada)
+      if (
+        effectiveRole.includes('super_admin') ||
+        effectiveRole.includes('admin_provinsi')
+      ) {
+        return true;
+      }
+
+      return false;
+    }
+
+    return true;
+  };
 
   const handleLogout = async () => {
     const result = await showConfirmation(
@@ -61,6 +173,18 @@ const AdminLayout: React.FC = () => {
     await showSuccess('Logout Berhasil', 'Anda telah keluar dari portal admin.');
     navigate('/login');
   };
+
+  // Batasi akses langsung ke halaman pengaturan hanya untuk admin_provinsi / super_admin
+  // Tunggu hingga userRole terbaca terlebih dahulu agar admin sah tidak ikut ter-redirect saat initial load
+  useEffect(() => {
+    if (!userRole) {
+      return;
+    }
+
+    if (location.pathname.startsWith('/admin/settings') && !canAccessSettings) {
+      navigate('/forbidden', { replace: true });
+    }
+  }, [location.pathname, canAccessSettings, navigate, userRole]);
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden relative">
@@ -120,7 +244,7 @@ const AdminLayout: React.FC = () => {
 
         {/* Navigation Links */}
         <nav className="flex-1 py-6 space-y-1 px-3 overflow-y-auto custom-scrollbar">
-          {menuItems.map((item) => {
+          {menuItems.filter((item) => isMenuItemVisible(item.label)).map((item) => {
             const Icon = item.icon;
             // Check active state
             const isActive = location.pathname.startsWith(item.path);
@@ -203,7 +327,7 @@ const AdminLayout: React.FC = () => {
                 <span className="text-xs text-slate-500">Admin Panel</span>
              </div>
              <div className="w-9 h-9 rounded-full bg-green-100 border border-green-200 flex items-center justify-center text-green-700 font-bold overflow-hidden">
-                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=0ea5e9&color=fff`} alt={userName} />
+                <img src={avatarSrc} alt={userName} />
              </div>
           </div>
         </header>

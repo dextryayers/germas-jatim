@@ -36,8 +36,11 @@ import {
   Tooltip as ChartTooltip,
   type ChartOptions,
   type ChartData,
+  type TooltipItem,
 } from 'chart.js';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+
 import { apiClient } from '../../utils/apiClient';
 import Swal from 'sweetalert2';
 
@@ -53,8 +56,10 @@ type DashboardCard = {
 type DashboardHistoryItem = {
   id: string;
   type: 'laporan' | 'evaluasi' | string;
+  submission_db_id?: number;
   title: string;
   instansi: string | null;
+  instansi_level?: string | null;
   status: 'pending' | 'verified' | 'rejected' | string;
   score: number | null;
   reviewer?: string | null;
@@ -121,7 +126,6 @@ type DashboardMetricsResponse = {
 const FALLBACK_CARDS: DashboardCard[] = [
   { id: 'reports_total', label: 'Laporan Masuk', value: 0, description: 'Menunggu pembaruan data' },
   { id: 'reports_pending', label: 'Perlu Verifikasi', value: 0, description: 'Menunggu pembaruan data' },
-  { id: 'instansi_total', label: 'Instansi Terdaftar', value: 0, description: 'Menunggu pembaruan data' },
   { id: 'average_score', label: 'Rata-rata Skor Evaluasi', value: 0, description: 'Menunggu pembaruan data' },
 ];
 
@@ -162,7 +166,6 @@ type CardVisual = {
 const CARD_VISUALS: Record<string, CardVisual> = {
   reports_total: { icon: FileCheck, accent: 'bg-blue-500/15 text-blue-600', halo: 'bg-blue-500/10' },
   reports_pending: { icon: AlertCircle, accent: 'bg-amber-400/15 text-amber-500', halo: 'bg-amber-400/10' },
-  instansi_total: { icon: Users, accent: 'bg-emerald-500/15 text-emerald-600', halo: 'bg-emerald-500/10' },
   average_score: { icon: TrendingUp, accent: 'bg-indigo-500/15 text-indigo-600', halo: 'bg-indigo-500/10' },
 };
 
@@ -182,7 +185,9 @@ const ACTIVITY_COLOR_MAP: Record<string, string> = {
 };
 
 const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [cards, setCards] = useState<DashboardCard[]>(FALLBACK_CARDS);
+
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [historyItems, setHistoryItems] = useState<DashboardHistoryItem[]>([]);
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
@@ -194,6 +199,7 @@ const AdminDashboard: React.FC = () => {
   const refreshTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const [userName, setUserName] = useState<string>('Administrator');
   const [userInstansi, setUserInstansi] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   const formatNumber = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
     return new Intl.NumberFormat('id-ID', options).format(value);
@@ -213,6 +219,14 @@ const AdminDashboard: React.FC = () => {
     },
     [formatNumber],
   );
+
+  const isProvLevelAdmin = useMemo(() => {
+    const role = (userRole ?? '').toLowerCase().trim();
+    if (!role) return false;
+    if (role.includes('super_admin')) return true;
+    if (role.includes('admin_provinsi')) return true;
+    return false;
+  }, [userRole]);
 
   const historyTrend = useMemo(() => {
     const grouping = new Map<
@@ -311,7 +325,7 @@ const AdminDashboard: React.FC = () => {
             boxWidth: 8,
             font: {
               size: 11,
-              weight: '600',
+              weight: 600,
             },
           },
         },
@@ -323,8 +337,8 @@ const AdminDashboard: React.FC = () => {
           bodyColor: '#0f172a',
           padding: 12,
           callbacks: {
-            label: (context) => `${context.dataset.label}: ${formatNumber(context.parsed.y)}`,
-            footer: (items) => {
+            label: (context: TooltipItem<'bar'>) => `${context.dataset.label}: ${formatNumber(context.parsed.y)}`,
+            footer: (items: TooltipItem<'bar'>[]) => {
               const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
               return `Total: ${formatNumber(total)}`;
             },
@@ -364,7 +378,7 @@ const AdminDashboard: React.FC = () => {
             font: {
               size: 11,
             },
-            callback: (value) => formatNumber(Number(value)),
+            callback: (value: string | number) => formatNumber(Number(value)),
           },
         },
       },
@@ -414,16 +428,20 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     const storedName = sessionStorage.getItem('user_name') ?? localStorage.getItem('user_name');
     const storedInstansi = sessionStorage.getItem('user_instansi_name') ?? localStorage.getItem('user_instansi_name');
+    const storedRole = sessionStorage.getItem('user_role') ?? localStorage.getItem('user_role');
+
     if (storedName) {
       setUserName(storedName);
     }
     if (storedInstansi) {
       setUserInstansi(storedInstansi);
     }
-  }, []);
+    if (storedRole) {
+      setUserRole(storedRole);
+    }
 
-  useEffect(() => {
-    fetchMetrics();
+    // Muat metrik dashboard pertama kali saat komponen di-mount
+    void fetchMetrics();
 
     if (refreshTimerRef.current) {
       window.clearInterval(refreshTimerRef.current);
@@ -456,10 +474,14 @@ const AdminDashboard: React.FC = () => {
         return parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
       })();
 
+      const rawTotal: any = (point as any).total;
+      const numericTotal =
+        typeof rawTotal === 'number' ? rawTotal : Number(typeof rawTotal === 'string' ? rawTotal.trim() : rawTotal) || 0;
+
       return {
         ...point,
         label,
-        total: typeof point.total === 'number' ? point.total : 0,
+        total: numericTotal,
       };
     });
 
@@ -557,11 +579,11 @@ const AdminDashboard: React.FC = () => {
           borderWidth: 1,
           titleColor: '#0f172a',
           bodyColor: '#0f172a',
-          titleFont: { size: 12, weight: '600' },
-          bodyFont: { size: 12, weight: '500' },
+          titleFont: { size: 12, weight: 600 },
+          bodyFont: { size: 12, weight: 500 },
           padding: 12,
           callbacks: {
-            label: (context) => `${formatNumber(context.parsed.y)} kunjungan`,
+            label: (context: TooltipItem<'line'>) => `${formatNumber(Number(context.parsed.y))} kunjungan`,
           },
         },
       },
@@ -600,7 +622,7 @@ const AdminDashboard: React.FC = () => {
             font: {
               size: 11,
             },
-            callback: (value) => formatNumber(Number(value)),
+            callback: (value: string | number) => formatNumber(Number(value)),
           },
         },
       },
@@ -762,17 +784,35 @@ const AdminDashboard: React.FC = () => {
         return;
       }
 
-      setHistoryItems((prev) => prev.filter((history) => history.id !== item.id));
+      try {
+        if (item.submission_db_id && (item.type === 'laporan' || item.type === 'evaluasi')) {
+          const basePath = item.type === 'laporan' ? '/laporan/submissions' : '/evaluasi/submissions';
+          await apiClient.delete(`${basePath}/${item.submission_db_id}`);
+        }
 
-      void Swal.fire({
-        icon: 'success',
-        title: 'Aktivitas dihapus',
-        text: 'Histori dan diagram telah diperbarui.',
-        timer: 1800,
-        showConfirmButton: false,
-      });
+        setHistoryItems((prev) => prev.filter((history) => history.id !== item.id));
+
+        void fetchMetrics({ silent: true });
+
+        void Swal.fire({
+          icon: 'success',
+          title: 'Aktivitas dihapus',
+          text: item.submission_db_id
+            ? 'Data laporan di server dan histori dashboard telah diperbarui.'
+            : 'Histori dan diagram telah diperbarui.',
+          timer: 1800,
+          showConfirmButton: false,
+        });
+      } catch (error) {
+        console.error('[Dashboard] Gagal menghapus aktivitas/backend submission:', error);
+        void Swal.fire({
+          icon: 'error',
+          title: 'Gagal menghapus',
+          text: 'Terjadi kesalahan saat menghapus data di server. Coba lagi.',
+        });
+      }
     },
-    [],
+    [fetchMetrics],
   );
 
   const handleAddHistory = useCallback(async () => {
@@ -850,6 +890,7 @@ const AdminDashboard: React.FC = () => {
       type: formValues.type,
       title: formValues.title,
       instansi: formValues.instansi || 'Instansi tidak dikenal',
+      instansi_level: null,
       status: formValues.status as DashboardHistoryItem['status'],
       score: formValues.score ? Number(formValues.score) : null,
       reviewer: null,
@@ -902,10 +943,6 @@ const AdminDashboard: React.FC = () => {
                   <Gauge className="h-4 w-4 text-blue-500" />
                   <span>Sistem dalam kondisi stabil</span>
                 </div>
-                <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200/70 bg-white/80 px-4 py-2 shadow-sm">
-                  <Users className="h-4 w-4 text-emerald-500" />
-                  <span>Tim verifikasi aktif: 5 personel</span>
-                </div>
               </div>
             </div>
             <aside className="w-full max-w-sm lg:max-w-xs">
@@ -936,18 +973,10 @@ const AdminDashboard: React.FC = () => {
                 <div className="mt-6 grid grid-cols-1 gap-3">
                   <button
                     type="button"
-                    onClick={() => setHistoryFilter('pending')}
+                    onClick={() => navigate('/admin/verifikasi')}
                     className="flex items-center justify-between rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition-transform hover:-translate-y-0.5 hover:shadow-emerald-500/40"
                   >
                     Tinjau laporan menunggu
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHistoryFilter('verified')}
-                    className="flex items-center justify-between rounded-2xl border border-emerald-200 bg-white px-5 py-3 text-sm font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-300"
-                  >
-                    Riwayat verifikasi
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
@@ -988,26 +1017,32 @@ const AdminDashboard: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {cards.map((card, idx) => {
-            const visuals = CARD_VISUALS[card.id] ?? DEFAULT_CARD_VISUAL;
-            const Icon = visuals.icon;
-            const formattedValue = card.id === 'average_score' ? formatMetricValue(card.value, 1) : formatMetricValue(card.value);
-            const description = card.description ?? 'Data akan diperbarui otomatis saat tersedia.';
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {cards
+            .filter((card) => card.id !== 'instansi_total')
+            .map((card, idx) => {
+              const visuals = CARD_VISUALS[card.id] ?? DEFAULT_CARD_VISUAL;
+              const Icon = visuals.icon;
+              const formattedValue = card.id === 'average_score' ? formatMetricValue(card.value, 1) : formatMetricValue(card.value);
+              const description = card.description ?? 'Data akan diperbarui otomatis saat tersedia.';
 
-            return (
-              <motion.div
-                key={card.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.08 }}
-                className="group relative overflow-hidden rounded-3xl border border-emerald-50 bg-white p-6 shadow-[0_12px_30px_-25px_rgba(15,118,110,0.38)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_40px_-30px_rgba(15,118,110,0.32)]"
-              >
-                <div className="relative z-10">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{card.label}</p>
-                      <h3 className="mt-2 text-3xl font-bold tracking-tight text-slate-800">{formattedValue}</h3>
+              return (
+                <motion.div
+                  key={card.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.08 }}
+                  className="group relative overflow-hidden rounded-3xl border border-emerald-50 bg-white p-6 shadow-[0_12px_30px_-25px_rgba(15,118,110,0.38)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_40px_-30px_rgba(15,118,110,0.32)]"
+                >
+                  <div className="relative z-10">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{card.label}</p>
+                        <h3 className="mt-2 text-3xl font-bold tracking-tight text-slate-800">{formattedValue}</h3>
+                      </div>
+                      <div className={`rounded-xl p-3 ${visuals.accent} shadow-sm transition-transform duration-300 group-hover:scale-110`}>
+                        <Icon className="h-6 w-6" />
+                      </div>
                     </div>
                     <div className={`rounded-xl p-3 ${visuals.accent} shadow-sm transition-transform duration-300 group-hover:scale-110`}>
                       <Icon className="h-6 w-6" />
@@ -1019,11 +1054,10 @@ const AdminDashboard: React.FC = () => {
                     </div>
                     <span>{description}</span>
                   </div>
-                </div>
-                <div className={`absolute -right-6 -bottom-6 h-28 w-28 rounded-full ${visuals.halo} opacity-40 transition-opacity group-hover:opacity-60`} />
-              </motion.div>
-            );
-          })}
+                  <div className={`absolute -right-6 -bottom-6 h-28 w-28 rounded-full ${visuals.halo} opacity-40 transition-opacity group-hover:opacity-60`} />
+                </motion.div>
+              );
+            })}
         </div>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
@@ -1140,6 +1174,11 @@ const AdminDashboard: React.FC = () => {
                                 <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">
                                   {item.instansi ?? 'Instansi tidak dikenal'}
                                 </p>
+                                {item.instansi_level && (
+                                  <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                                    {item.instansi_level}
+                                  </p>
+                                )}
                               </div>
                               <div className="flex items-center gap-2">
                                 <div className="text-right text-xs text-slate-400">
@@ -1236,95 +1275,100 @@ const AdminDashboard: React.FC = () => {
           </section>
 
           <div className="flex flex-col gap-8">
-            <section className="rounded-3xl border border-sky-100 bg-white p-8 shadow-[0_18px_40px_-30px_rgba(2,132,199,0.35)]">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.35em] text-sky-700">
-                    <span className="h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
-                    Visitor Live
-                  </div>
-                  <h3 className="mt-3 text-xl font-bold text-slate-800">Statistik Kunjungan</h3>
-                  <p className="mt-1 text-sm text-slate-500">Pantau trafik harian & mingguan</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/15 text-sky-600">
-                  <BarChart3 className="h-6 w-6" />
-                </div>
-              </div>
-
-              <div className="mt-6 grid grid-cols-3 gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Total</p>
-                  <p className="text-xl font-bold text-slate-800">{formatMetricValue(analyticsTotals.total)}</p>
-                  <span className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-500">Sejak pertama kali</span>
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Hari ini</p>
-                  <p className="text-xl font-bold text-slate-800">{formatMetricValue(analyticsTotals.today)}</p>
-                  <span className={`mt-1 inline-flex items-center gap-1 text-xs font-semibold ${visitorDelta >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {`${visitorDelta >= 0 ? '+' : ''}${formatNumber(Math.abs(visitorDelta))}`} vs kemarin
-                  </span>
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">7 hari</p>
-                  <p className="text-xl font-bold text-slate-800">{formatMetricValue(analyticsTotals.week)}</p>
-                  <span className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
-                    Rata-rata {formatNumber((analyticsTotals.week || 0) / 7, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/hari
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-8 h-56">
-                {hasVisitorData ? (
-                  <div className="h-full w-full">
-                    <Line options={visitorChartOptions} data={visitorChartData} />
-                  </div>
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center text-sm text-slate-400">
-                    <p>Belum ada kunjungan yang terekam.</p>
-                    <p className="mt-1 text-xs">Statistik akan muncul otomatis setelah pengunjung mengakses situs.</p>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="flex flex-col rounded-3xl border border-emerald-50 bg-white p-8 shadow-[0_18px_40px_-32px_rgba(15,118,110,0.34)]">
-              <h3 className="mb-6 flex items-center gap-2 text-xl font-bold text-slate-800">
-                <Activity className="h-5 w-5 text-primary-500" />
-                Aktivitas Terbaru
-              </h3>
-              <div className="flex-1 space-y-0 overflow-y-auto pr-2 custom-scrollbar">
-                {recentActivity.length === 0 ? (
-                  <div className="flex h-40 items-center justify-center rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/40">
-                    <p className="text-sm text-slate-500">Belum ada aktivitas terbaru yang tercatat.</p>
-                  </div>
-                ) : (
-                  recentActivity.map((activity, index) => {
-                    const colorClass = ACTIVITY_COLOR_MAP[activity.type] ?? 'bg-slate-400';
-                    const isLast = index === recentActivity.length - 1;
-
-                    return (
-                      <div key={activity.id ?? `${activity.type}-${index}`} className="group relative flex gap-4 pb-6">
-                        {!isLast && <div className="absolute left-2.5 top-8 bottom-0 w-0.5 bg-slate-100 transition-colors group-hover:bg-slate-200" />}
-                        <div className={`relative z-10 mt-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 border-white shadow-sm ${colorClass}`}>
-                          <div className="h-1.5 w-1.5 rounded-full bg-white" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-slate-800 transition-colors group-hover:text-primary-600">
-                            {activity.instansi ?? 'Aktivitas Sistem'}
-                          </p>
-                          <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{activity.description}</p>
-                          <p className="mt-1 text-[10px] font-medium text-slate-400">{formatRelativeTime(activity.created_at)}</p>
-                        </div>
+            {isProvLevelAdmin && (
+              <>
+                <section className="rounded-3xl border border-sky-100 bg-white p-8 shadow-[0_18px_40px_-30px_rgba(2,132,199,0.35)]">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.35em] text-sky-700">
+                        <span className="h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
+                        Aktivitas Sistem
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            </section>
+                      <h3 className="mt-3 text-xl font-bold text-slate-800">Statistik Aktivitas</h3>
+                      <p className="mt-1 text-sm text-slate-500">Pergerakan perubahan status laporan & evaluasi</p>
+                    </div>
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/15 text-sky-600">
+                      <BarChart3 className="h-6 w-6" />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Total Aktivitas</p>
+                      <p className="text-xl font-bold text-slate-800">{formatMetricValue(analyticsTotals.total)}</p>
+                      <span className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-500">Sejak pertama kali</span>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Hari ini</p>
+                      <p className="text-xl font-bold text-slate-800">{formatMetricValue(analyticsTotals.today)}</p>
+                      <span className={`mt-1 inline-flex items-center gap-1 text-xs font-semibold ${visitorDelta >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                        {`${visitorDelta >= 0 ? '+' : ''}${formatNumber(Math.abs(visitorDelta))}`} vs kemarin
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">7 hari terakhir</p>
+                      <p className="text-xl font-bold text-slate-800">{formatMetricValue(analyticsTotals.week)}</p>
+                      <span className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
+                        Rata-rata {formatNumber((analyticsTotals.week || 0) / 7, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/hari
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 h-56">
+                    {hasVisitorData ? (
+                      <div className="h-full w-full">
+                        <Line options={visitorChartOptions} data={visitorChartData} />
+                      </div>
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center text-sm text-slate-400">
+                        <p>Belum ada aktivitas yang terekam.</p>
+                        <p className="mt-1 text-xs">Statistik akan muncul otomatis setelah ada perubahan status laporan atau evaluasi.</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="flex flex-col rounded-3xl border border-emerald-50 bg-white p-8 shadow-[0_18px_40px_-32px_rgba(15,118,110,0.34)]">
+                  <h3 className="mb-6 flex items-center gap-2 text-xl font-bold text-slate-800">
+                    <Activity className="h-5 w-5 text-primary-500" />
+                    Aktivitas Terbaru
+                  </h3>
+                  <div className="flex-1 space-y-0 overflow-y-auto pr-2 custom-scrollbar">
+                    {recentActivity.length === 0 ? (
+                      <div className="flex h-40 items-center justify-center rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/40">
+                        <p className="text-sm text-slate-500">Belum ada aktivitas terbaru yang tercatat.</p>
+                      </div>
+                    ) : (
+                      recentActivity.map((activity, index) => {
+                        const colorClass = ACTIVITY_COLOR_MAP[activity.type] ?? 'bg-slate-400';
+                        const isLast = index === recentActivity.length - 1;
+
+                        return (
+                          <div key={activity.id ?? `${activity.type}-${index}`} className="group relative flex gap-4 pb-6">
+                            {!isLast && <div className="absolute left-2.5 top-8 bottom-0 w-0.5 bg-slate-100 transition-colors group-hover:bg-slate-200" />}
+                            <div className={`relative z-10 mt-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 border-white shadow-sm ${colorClass}`}>
+                              <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-slate-800 transition-colors group-hover:text-primary-600">
+                                {activity.instansi ?? 'Aktivitas Sistem'}
+                              </p>
+                              <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{activity.description}</p>
+                              <p className="mt-1 text-[10px] font-medium text-slate-400">{formatRelativeTime(activity.created_at)}</p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </section>
+              </>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
-}
+};
+
 export default AdminDashboard;

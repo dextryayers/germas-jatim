@@ -3,22 +3,23 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import { LoadingSpinner } from './components/ui/Loading';
 import RequireAuth from './components/RequireAuth';
+import MaintenanceGate from './components/MaintenanceGate';
 
 // Lazy load pages for performance
 const Home = lazy(() => import('./pages/Home'));
 const Forms = lazy(() => import('./pages/Forms'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Login = lazy(() => import('./pages/Login'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Register = lazy(() => import('./pages/Register'));
 const Forbidden = lazy(() => import('./pages/Forbidden'));
+const VerifyAdminCode = lazy(() => import('./pages/VerifyAdminCode'));
+const Maintenance = lazy(() => import('./pages/Maintenance'));
 
 // Admin Pages
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));
 const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
 const AdminVerification = lazy(() => import('./pages/admin/Verification'));
-const AdminRegions = lazy(() => import('./pages/admin/Regions'));
 const AdminUsers = lazy(() => import('./pages/admin/Users'));
 const AdminSettings = lazy(() => import('./pages/admin/Settings'));
 const AdminProfile = lazy(() => import('./pages/admin/Profile'));
@@ -27,20 +28,25 @@ const AdminFormBuilder = lazy(() => import('./pages/admin/FormBuilder')); // New
 const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-slate-50"><LoadingSpinner /></div>}>
-        <Routes>
+      <MaintenanceGate>
+        <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-slate-50"><LoadingSpinner /></div>}>
+          <Routes>
+
           {/* Public Routes */}
           <Route path="/" element={<Layout />}>
             <Route index element={<Home />} />
             <Route path="formulir" element={<Forms />} />
-            <Route path="dashboard" element={<Dashboard />} />
           </Route>
           
           <Route path="/login" element={<Login />} />
+
           <Route path="/forbidden" element={<Forbidden />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/verify-admin-code" element={<VerifyAdminCode />} />
           <Route path="/forget-password" element={<ForgotPassword />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/maintenance" element={<Maintenance />} />
+
           <Route path="/dash-admin" element={<Navigate to="/admin/dashboard" replace />} />
 
           {/* Admin Routes */}
@@ -55,7 +61,6 @@ const App: React.FC = () => {
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="verifikasi" element={<AdminVerification />} />
-            <Route path="wilayah" element={<AdminRegions />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="forms" element={<AdminFormBuilder />} /> {/* New Route */}
             <Route path="settings" element={<AdminSettings />} />
@@ -66,6 +71,7 @@ const App: React.FC = () => {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
+      </MaintenanceGate>
     </BrowserRouter>
   );
 };

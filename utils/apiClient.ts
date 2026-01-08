@@ -22,7 +22,15 @@ const deriveDefaultBaseUrl = () => {
       return 'http://localhost:8000/api';
     }
 
-    return ensureApiSuffix(origin);
+    const normalizedHost = url.hostname.replace(/^www\./i, '');
+    const apiHost = normalizedHost.startsWith('api.') ? normalizedHost : `api.${normalizedHost}`;
+    const apiOrigin = `${url.protocol}//${apiHost}`;
+
+    if (origin === apiOrigin) {
+      return ensureApiSuffix(`${origin}/backend/public`);
+    }
+
+    return ensureApiSuffix(apiOrigin);
   } catch {
     return 'http://localhost:8000/api';
   }
